@@ -112,10 +112,24 @@ the running server; only with explicit confirmation):
 ```yaml
     # ⌘. toggles the Settings panel (Safari swallows ⌘,).
     # Source: ~/github/tali-dash-plugins/plugins/settings-shortcut
-    # Recipe: ~/projects/deepseek-harness/settings-keyboard-shortcut-plugin.md
+    # Recipe: ~/github/tali-dash-plugins/recipes/settings-keyboard-shortcut-plugin.md
     - id: tali-settings-shortcut
       name: '/Users/tali/github/tali-dash-plugins/plugins/settings-shortcut/index.js'
 ```
+
+**Then reload the GUI page once (⌘R, also in the Dock web app).** The live
+patch reload inserts the row on the host and the incremental client-modules
+scan adds it to the `window.__DSH_BOOT__` graph, but an already-open page
+only fetches bundles listed in the graph it booted with. HMR hot-swaps
+bundles the page already has; it never injects a *new* module into a running
+page. Installed 2026-09-15: ⌘. "did nothing" until that one reload.
+
+Verifying from the outside is not possible without the GUI: the `/plugins`
+route answers only the exact advertised URL (`/plugins/??<pkg>/client.js&rev=…`,
+`rev` is a process nonce) and `/` needs the per-process launch token (printed
+once to the server's terminal — Ghostty, unreadable via AppleScript).
+Verification is therefore: reload, press the chord, or check the browser
+console for `[settings-shortcut] ⌘. toggles Settings`.
 
 ## Troubleshooting
 
@@ -124,7 +138,8 @@ the running server; only with explicit confirmation):
 | ⌘, opens the browser's/web app's settings | Expected in Safari; unfixable from web code. Use ⌘. or a system-level remap. |
 | Console: `[settings-shortcut] no-trigger` | Shell markup changed (sidebar `_settingsArea` wrapper or trigger `aria-haspopup`). Update selectors in `src/client/index.ts` after reading `ui-sidebar/SidebarRoot.tsx` + `ui-settings-general/SettingsRoot.tsx`. |
 | Console: `no-close` | Panel close button class changed (`_close` inside `[role=dialog]._panel`). |
-| Chord does nothing, no console line | Bundle not loaded: check `window.__DSH_BOOT__` for `tali-settings-shortcut`, and that `lib/client.js` existed when the server booted. |
+| Chord does nothing right after a live install | The open page predates the row: reload the page once (see above). |
+| Chord does nothing after a reload, no console line | Bundle not loaded: check `window.__DSH_BOOT__` for `tali-settings-shortcut`, and that `lib/client.js` existed when the row was (re)loaded. |
 | `osascript` "privilege violation (-10004)" / `ps: Operation not permitted` | Session sandbox is `workspace-write`; System Events needs the wider mode (approval prompt or `danger-full-access`). |
 | System Events reports `code: NumpadDecimal` | Normal for synthesized ⌘.; the matcher accepts it. |
 | Preview onboarding dialog covers Settings | Fresh `DSH_HOME` shows the testing notice + API-key step; click Continue / "Configure later". |

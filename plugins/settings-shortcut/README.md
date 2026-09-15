@@ -86,3 +86,8 @@ server):
     - id: tali-settings-shortcut
       name: '/Users/tali/github/tali-dash-plugins/plugins/settings-shortcut/index.js'
 ```
+
+Then **reload the GUI page once**: the live reload adds the row to the boot
+graph, but a page that is already open only fetches the bundles its graph
+listed at load time (HMR swaps existing bundles; it does not inject new
+modules). Recipe: `recipes/settings-keyboard-shortcut-plugin.md`.
