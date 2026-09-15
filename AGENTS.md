@@ -1,33 +1,65 @@
 # AGENTS.md — tali-dash-plugins
 
-Local-only plugins for DeepSeek Harness (DSH). This file is the onboarding
-guide for agents working in this repo: how DSH plugins work, how this repo is
-laid out, and where the authoritative docs live.
+Tali's out-of-tree work on DeepSeek Harness (DSH): **plugin code** under
+`plugins/`, **recipes** (one Markdown file per completed setup/change) under
+`recipes/`, and helper scripts under `tools/`. This file is the onboarding
+guide for agents working here: how DSH plugins work, how this repo is laid
+out, where the authoritative docs live, and how to record what you did.
 
-> **VERY IMPORTANT: changes under the user's live DSH home (`~/.dsh`) can
-> hot-reload the very client/server session YOU are likely being run in,
-> making it inoperative.** The `web` profile ships `patchReload: 'live'`, so
-> edits to `~/.dsh/cordis.patch.yml` or `~/.dsh/profiles/<name>/cordis.patch.yml`
-> apply to the running server THE MOMENT you save. Rebuilding a plugin bundle
-> that is installed in the live profile hot-swaps the live browser too. Even
-> boot-time changes (`dsh plugin add`/`remove`) alter what the user's next
-> launch runs. Make none of these changes unless explicitly asked; if the
-> user only implies it (e.g. "install this plugin", "fix this DSH bug"),
-> confirm first that they mean their live DSH. The safe, no-confirmation way
-> to trial a plugin is the isolated preview server — see
-> [PREVIEWING.md](PREVIEWING.md).
+> **VERY IMPORTANT: changes under the user's live DSH home (`$DSH_HOME`,
+> default `~/.dsh`) can hot-reload the very client/server session YOU are
+> likely being run in, making it inoperative.** The `web` profile ships
+> `patchReload: 'live'`, so edits to `$DSH_HOME/cordis.patch.yml` or
+> `$DSH_HOME/profiles/<name>/cordis.patch.yml` apply to the running server
+> THE MOMENT you save. Rebuilding a plugin bundle that is installed in the
+> live profile hot-swaps the live browser too. Even boot-time changes
+> (`dsh plugin add`/`remove`) alter what the user's next launch runs. Make
+> none of these changes unless explicitly asked; if the user only implies it
+> (e.g. "install this plugin", "fix this DSH bug"), confirm first that they
+> mean their live DSH. The safe, no-confirmation way to trial a plugin is the
+> isolated preview server — see [PREVIEWING.md](PREVIEWING.md).
+
+## Locations (symbolic — resolve them on the machine you are on)
+
+| Symbol | Meaning | What belongs there |
+|---|---|---|
+| `<plugins>` | **this repo** | All plugin code (`plugins/<name>/`), recipes (`recipes/`), helper tools (`tools/`), the dev overlay `cordis.dev.yml` |
+| `<dsh-src>` | the DSH **source checkout** (the git clone that `pnpm dsh web` runs from) | Read-only reference for APIs, docs (`docs/`), shipped presets. Never fork/patch it to add features; extend via plugins |
+| `$DSH_HOME` | the DSH home, default `~/.dsh` | Configuration, not code: `settings.yaml` (providers, models), `.agent-presets/`, `profiles/web/cordis.patch.yml` (which plugins the live web GUI runs), `sessions/`, `attachments/` |
+| `<recipes-ws>` | Tali's **recipes workspace** — a code-free directory used as a session cwd whose `AGENTS.md` just points here | Nothing; recipes live in `<plugins>/recipes/` |
+
+All doc paths below are relative to `<dsh-src>`. **Verify APIs against the
+checkout** before relying on this file — it is a summary, the checkout is the
+truth. Recipes spell out the concrete `~`-relative paths of the machine they
+were written on; map them onto the symbols above when you are elsewhere.
+
+Absolute paths are unavoidable in two places and are fine there (local-only
+repo): `cordis.dev.yml` rows (`name:` must be an absolute module path) and the
+`link:` devDependencies each plugin uses for type-checking — regenerate both if
+the checkout or this repo moves.
+
+## Permissions (deliberate — do not "fix")
+
+Sessions started from `<recipes-ws>` have `workspace-write` over that
+directory only. Writing plugin code or recipes into `<plugins>` (or config
+into `$DSH_HOME`) triggers one approval escalation per operation — **that is
+Tali's chosen setup** (decided 2026-09-05). Do not try to widen the sandbox:
+the DSH file policy is single-root by design (`workspaceRoot` = session cwd;
+enforcement is canonicalize-then-contain, so symlinks don't help; no plugin
+seam exists, and shell writes enforce the same roots at the OS level). Just
+attempt the write and let the approval prompt do its job. If approvals are
+disabled in a session, a denial is final.
 
 ## Ground rules
 
-- The DSH source checkout is at `~/github/deepseek-harness`. All doc paths
-  below are relative to that checkout. **Verify APIs against the checkout**
-  before relying on this file — it is a summary, the checkout is the truth.
 - Plugins are developed **out-of-tree** (this repo). Never fork/patch DSH to
   add a feature: "There is no privileged core to patch: you extend dsh by
   mounting a plugin beside the others" (`docs/architecture.md`).
 - Layout: one plugin = one directory under `plugins/`, each an installable npm
   package. `cordis.dev.yml` at the repo root is the dev overlay that loads all
-  of them by absolute path (machine-specific, that is fine — local-only repo).
+  of them by absolute path.
+- The recipe owns the system-level story; the plugin README owns the plugin.
+  Cross-reference rather than duplicate.
 
 ## The plugin model (Cordis)
 
@@ -66,8 +98,8 @@ generated API in `docs/cordis-api/`):
 1. **Dev overlay** (what this repo uses day-to-day):
 
    ```sh
-   cd ~/github/deepseek-harness
-   pnpm dsh web --patch /Users/tali/github/tali-dash-plugins/cordis.dev.yml
+   cd <dsh-src>
+   pnpm dsh web --patch <plugins>/cordis.dev.yml
    ```
 
    The overlay `insert`s rows whose `name` is an **absolute path** to the
@@ -92,6 +124,9 @@ Register tools, listen to agent events, provide services. Start points:
   events a host plugin can hook.
 - Running from the source checkout, a row may point straight at a `.ts` file
   (the host runs through tsx). Built JS always works.
+- Host module edits need a `dsh web` restart — a live patch-row reload re-runs
+  `apply` from Node's module cache (module-source HMR is off). Client bundle
+  rebuilds hot-swap on their own.
 
 ## Client plugins (Web GUI side)
 
@@ -175,8 +210,8 @@ export function apply(ctx: Context) {
 ### Dev loop for client plugins
 
 ```sh
-cd plugins/<plugin> && pnpm watch        # rebuilds lib/client.js on save
-cd ~/github/deepseek-harness && pnpm dsh web --patch .../cordis.dev.yml
+cd <plugins>/plugins/<plugin> && pnpm watch   # rebuilds lib/client.js on save
+cd <dsh-src> && pnpm dsh web --patch <plugins>/cordis.dev.yml
 ```
 
 ### The preview server (isolated sandbox)
@@ -185,12 +220,99 @@ Trial plugins in a second `dsh web` instance against a throwaway `DSH_HOME` —
 never by patching the user's live config. Command, credential forwarding,
 tokened-URL and HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
 
+### Verifying a client change without a GUI login
+
+`dsh web` authenticates the browser with a per-process launch token printed
+only in its terminal, so an agent's own browser usually cannot open the live
+GUI. Alternative used in `recipes/wolfram-kernel-supervisor.md`: load
+`lib/client.js` in Node under a fake `window.__ModuleLoader__` with stub
+platform modules, capture what `apply(ctx)` registers, and replay a real
+session log (`zstd -dc $DSH_HOME/sessions/<ws>/<session>/session.jsonl.zstd`)
+through it.
+
 ### Type-checking against the checkout
 
 Each plugin declares `link:` devDependencies pointing into the checkout
 (`vendor/cordis`, `packages/client/ui-slots`, ...) so `pnpm typecheck` sees
 the real d.ts files. Links are absolute paths — regenerate if the checkout
 moves. esbuild does not type-check; the build works even if types drift.
+
+## Recipes (`recipes/`)
+
+After completing any non-trivial DSH task — adding a provider, authoring a
+plugin or preset, installing/configuring third-party plugins, infrastructure
+like local model servers, diagnosing a bug — write (or update) a recipe in
+`recipes/`, written so a future agent (or human) with zero session context
+can reproduce or maintain it:
+
+- One topic per file, kebab-case name (`apple-foundation-model-provider.md`,
+  `cloudflare-remote-control.md`, `install-rewind-plugin.md` are examples).
+- Exact paths, exact config blocks, exact commands, and the *why* behind
+  non-obvious choices.
+- Record what **failed** and why, not just the happy path — failed attempts
+  are what save the next agent hours.
+- Include a troubleshooting table when the task had failure modes.
+- Cross-reference plugin READMEs rather than duplicating them.
+- Add the new recipe to the index below.
+
+### Recipe index
+
+- `agent-status-indicator-plugin.md` — floating animated status/tool icons in
+  the chat area (`agent-status-indicator` plugin), its document-type icon
+  pipeline, and how to rebuild/preview it.
+- `anthropic-many-image-2000px-limit.md` — "many-image requests: 2000 pixels"
+  400 after the 21st image of a session: Anthropic's >20-image per-dimension
+  cap vs DSH's pixel-count-only `requestImagePixelBudget`, diagnosing from
+  attachment metadata in the session log, the 1.15 MP per-provider setting
+  in `$DSH_HOME/settings.yaml`, and why downscaling beats offloading for the
+  prompt cache.
+- `anthropic-new-model-before-catalog.md` — using a model newer than the
+  installed catalog.
+- `apple-foundation-model-provider.md` — local models as DSH providers
+  (LM Studio + Apple Foundation via AFM), the pi-ai token-budget trap,
+  minimal presets, and the `enforce-model-preset` plugin.
+- `browser-automation-plugin.md` — per-chat Safari Technology Preview /
+  Chrome windows and the isolated page reader (`browser-automation` plugin):
+  why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
+  live profile row, and the attempts that failed.
+- `cloudflare-remote-control.md` — phone remote control via dsh-full-remote
+  behind cloudflared.
+- `dash-docsets-plugin.md` — Dash 8 docsets as native tools (`dash-docsets`
+  plugin): the Dash HTTP API facts (port file, endpoints, anchors, FTS
+  quirks), why native tools instead of Kapeli's MCP server, the in-process
+  HTML→Markdown decision, install/test commands, and the failure table.
+- `foreign-link-opener-plugin.md` — Dock-installed (Safari "Add to Dock") DSH
+  web app opening other-port/other-host links in a new DSH window: why the
+  manifest cannot fix it (web-app scope is host-only, `window.open` never
+  leaves the app) and the `foreign-link-opener` plugin that hands such links
+  to real Safari via `open -a`.
+- `import-claude-code-sessions.md` — migrating Supacode/Claude Code transcripts
+  (and their project memory) into DSH sessions: why Supacode keeps no
+  transcripts, the session-log frame contract, the converter tool in
+  `tools/`, and the installed `dsh-import-agents` plugin alternative.
+- `install-rewind-plugin.md` — session rewind plugin install.
+- `notion-mcp.md` — Notion's hosted MCP server in the web profile: why DSH's
+  mcp-client can't do OAuth, the `mcp-remote` stdio bridge, the one-time
+  terminal login into `~/.mcp-auth`, and the sandbox/`npx` EPERM trap.
+- `plugin-inject-string-content-bug.md` — "This turn failed: content.some is
+  not a function": a host plugin passed a bare string as `agent.inject`
+  `content`, poisoning the session log; the `UserMessage` shape rule, the fix
+  in `browser-automation`/`wolfram-kernel-supervisor`, and the
+  `repair-session-string-content.mjs` log-repair tool (zstd multi-frame and
+  packed-chunk-row traps).
+- `preview-identity.md` — red icon + "DSH-dev" label for the preview server,
+  and the dev-overlay/live-profile collision rule.
+- `settings-keyboard-shortcut-plugin.md` — ⌘. toggles the web GUI Settings
+  panel (`settings-shortcut` plugin): why ⌘, is impossible in Safari (the
+  app consumes it before the page), the component-local open state that
+  forces DOM clicks on `[hash]_[local]` class selectors, and how to test a
+  chord with a real System Events keystroke instead of a synthetic one.
+- `wolfram-kernel-supervisor.md` — per-chat Wolfram/Mathematica kernels
+  (`wolfram-kernel-supervisor` plugin): the Pi `wolfram_Show`/rho archaeology,
+  why the paclet fork's Show tool is obsolete, `wolfram_show`'s user-only image
+  path (presentationMeta + pinned turn-tail gallery + plugin fetch route, and
+  the gallery's skip rules for error-box renders / duplicate attachments), the
+  SIGTERM-immune kernel and its kill ladder, and the client-plugin gotchas.
 
 ## Doc map (checkout-relative)
 

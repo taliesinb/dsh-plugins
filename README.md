@@ -10,10 +10,13 @@ cd plugins/agent-status-indicator
 pnpm install
 pnpm build          # or: pnpm watch
 
-# from the DSH checkout:
-cd ~/github/deepseek-harness
-pnpm dsh web --patch /Users/tali/github/tali-dash-plugins/cordis.dev.yml
+# from the DSH source checkout:
+cd <dsh-src>
+pnpm dsh web --patch <this repo>/cordis.dev.yml
 ```
+
+Recipes — one Markdown file per completed DSH setup/change, written so a
+future agent can reproduce it — live in `recipes/` (index in `AGENTS.md`).
 
 ## Plugins
 
