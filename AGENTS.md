@@ -276,7 +276,12 @@ can reproduce or maintain it:
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
   live profile row, and the attempts that failed.
 - `cloudflare-remote-control.md` — phone remote control via dsh-full-remote
-  behind cloudflared.
+  behind cloudflared: install + profile patch, the 反向代理 locale bug and its
+  root cause, the `taliesinb/dsh-full-remote` fork (`~/github/dsh-full-remote`,
+  branch `tali/main`) with the reactive-locale fix and the **Tailscale route**
+  feature (why port-based not `/dsh`, the tagged-node login-allowlist facts,
+  the identity-header trust conditions vs cloudflared spoofing, `tailscale
+  serve` CLI syntax), plus Phase 2 (named tunnel + Cloudflare Access).
 - `dash-docsets-plugin.md` — Dash 8 docsets as native tools (`dash-docsets`
   plugin): the Dash HTTP API facts (port file, endpoints, anchors, FTS
   quirks), why native tools instead of Kapeli's MCP server, the in-process

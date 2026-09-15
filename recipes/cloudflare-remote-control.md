@@ -138,10 +138,13 @@ fix is binding reactively with `ctx.inject(['locale'], …)`.
   is Node 22/24. Vitest 4 rejects the old `poolOptions.forks.execArgv` shape —
   `execArgv` is top-level now.
 - Toolchain: `pnpm install` (pnpm 11.21 via `packageManager`; `prepare` builds
-  `lib/`), `pnpm run check` = lint + typecheck + 229 unit + 67 client tests +
-  build. All green.
+  `lib/`), `pnpm run check` = lint + typecheck + unit + client tests + build.
+  All green (251 unit + 73 client after the Tailscale feature).
+- Commit `8e5e29b` "feat: Tailscale Serve route with optional user-based
+  auth" — see [Fork feature: Tailscale route](#fork-feature-tailscale-route)
+  below.
 
-Installing the fork into the live profile (not yet done — features pending):
+Installing the fork into the live profile (not yet done):
 
 ```sh
 cd ~/github/dsh-full-remote && pnpm run build
@@ -196,6 +199,115 @@ Label map, in case the panel is still Chinese:
 | 公网 / 可达 Origin | Public / reachable Origin (leave empty) | 设备显示名称 | Device display name |
 | 生成邀请 / 复制邀请链接 | Generate invite / Copy invite link | 已连接设备 → 批准 | Connected devices → Approve |
 | 访问令牌 → 显示访问令牌 / 轮换令牌 | Access token → Show / Rotate token | | |
+
+## Fork feature: Tailscale route
+
+Added on `tali/main` (commit `8e5e29b`, 2026-09-15): a **Tailscale** group in
+Settings → Reverse proxy, above *One-click public tunnel*, that publishes the
+proxy listener on the laptop's own tailnet hostname with `tailscale serve`.
+Route card (Route is active / off / Port is taken / Tailscale unavailable;
+**Enable route** / **Disable route** / **Run self-check**), a Protocol select
+and Port field (locked while active), a **User-based auth** checkbox with an
+*Allowed Tailscale logins* field, and — while active — a second entry under
+*Tunnel target* (`http://tbwork/`) which also becomes the default invite
+origin when no quick tunnel is online.
+
+### Design decisions and the facts behind them
+
+- **Port-based route, not a `/dsh` path.** The original spec wanted
+  `http://tbwork/dsh`. Not viable: tailscaled strips the `--set-path` mount
+  prefix before proxying (tailscale/tailscale commit 7908b6d, "Trim mountPoint
+  prefix from proxy path"), and DSH has no base-path support —
+  `packages/client/connection/src/api-path.ts` hard-codes `API_PATH = '/api'`,
+  no `<base href>`, absolute `/assets/...` and WebSocket URLs — so every asset
+  would 404 at `http://tbwork/assets/...`. Rewriting minified bundles was
+  judged too fragile. Route = a port on the node: `80` → `http://tbwork/`,
+  `8080` → `http://tbwork:8080/`. Default HTTP on 80 (short MagicDNS name;
+  WireGuard encrypts in transit). HTTPS is available but must use the FQDN
+  `https://tbwork.tailbce956.ts.net/` — the Tailscale cert only covers that.
+  DSH's client needs no secure context (`randomUUID` is built on
+  `getRandomValues`), so plain `http://` works on iOS.
+- **Explicit login allowlist, not "== local user".** `tbwork` is a *tagged*
+  node (`tag:research`, `tag:typst-host`) on the `symbolica.ai` tailnet, so it
+  has no owning user (`tailscale status --json` reports `Self.UserID` →
+  `LoginName: tbwork.tailbce956.ts.net`), and no `tali@symbolica.ai` user
+  exists until the phone joins. The allowlist must be typed:
+  `tali@symbolica.ai` (whatever SSO login the phone ends up with; check the
+  laptop audit log's `access.identity` event or `tailscale whois <phone-ip>`).
+- **Identity trust conditions.** Tailscale Serve injects `Tailscale-User-Login`
+  (tailnet-verified; client-supplied copies are overwritten) and forces
+  `X-Forwarded-For` to the peer's tailnet IP — verified independently in
+  deepseek-harness discussion #3210. But cloudflared is *also* a loopback peer
+  and does **not** strip a spoofed `Tailscale-User-Login`, so with both the
+  quick tunnel and identity auth on, an internet attacker could forge it. The
+  proxy therefore trusts the header only when: route active + identity auth on
+  + login allowlisted + socket peer loopback + rightmost `X-Forwarded-For` in
+  `100.64.0.0/10` or `fd7a:115c:a1e0::/48` (a public client can never be the
+  last hop with a CGNAT address) + no `cf-connecting-ip`/`cf-ray`/
+  `cf-ipcountry`/`cdn-loop`. Identity headers are stripped before forwarding
+  to DSH. Identity headers are **not** populated for traffic from tagged
+  devices (Tailscale docs) — irrelevant for a phone, relevant for the
+  self-check probe, which therefore cannot verify identity auth.
+- **tailscaled is the source of truth.** `tailscale serve --bg` persists in
+  tailscaled across reboots, so the plugin persists only *intent*
+  (`tailscale: {enabled, port, https, identityAuth, allowedLogins}` in
+  `~/.dsh/reverse-proxy.json`) and derives "active" from `serve status --json`
+  (`Web["<dnsName>:<port>"].Handlers["/"].Proxy` equal to the proxy listener
+  URL). A mapping pointing elsewhere is `conflict`; a stale loopback one (the
+  proxy's port changed) may be overwritten, a foreign target may not. The
+  route follows the proxy on listen-port changes.
+
+### CLI facts (tailscale 1.102.3, macOS)
+
+- Enable: `tailscale serve --bg --yes --http=80 http://127.0.0.1:3082`
+  (`--https=443` for TLS). Verify with `tailscale serve status --json`.
+- Disable one port: `tailscale serve --http=80 off`. (`off --help` errors —
+  the CLI treats it as an argument-format error; the plain form works.)
+- Serve is already enabled on this tailnet (the `svc:typst` service); node
+  root and ports are free. `tailscale serve status` JSON: top-level `TCP`,
+  `Web`, and `Services` (`svc:*` have their own hostnames).
+- Binary resolution: `tailscalePath` config → PATH (`/usr/local/bin/tailscale`
+  here) → `/Applications/Tailscale.app/Contents/MacOS/Tailscale` →
+  `/opt/homebrew/bin/tailscale`.
+
+### Smoke test that proved it (repeatable)
+
+`node --experimental-strip-types /tmp/ts-smoke.mts` — a throwaway echo
+listener plus `createTailscaleManager` with `route.port = 8099`: enable → `ok`,
+`http://tbwork:8099/probe` answered HTTP 200 through tailscaled with
+`x-forwarded-for: 100.114.226.21` (the node's own tailnet IP, in the CGNAT
+range) and `x-forwarded-host: tbwork:8099`, no identity header (self-probe from
+a tagged node, as documented) → disable → `off`; `tailscale serve status`
+back to typst-only. Script body is in the commit message's test notes; rebuild
+it from `src/tailscale.ts` if needed.
+
+### Where things live in the fork
+
+| File | Role |
+|---|---|
+| `src/tailscale.ts` | CLI wrapper + manager (`status/refresh/cached/enable/disable`), URL/login helpers, `looksLikeServePeer`, header names |
+| `src/index.ts` | manager wiring, `identityLogin` probe on the proxy spec, `configureTailscale` / `enableTailscale` / `disableTailscale` / `tailscaleSelfCheck`, republish on listen change, invite origin fallback |
+| `src/proxy.ts` | `identityLogin` in the request and upgrade gates, `identitySessionId('tailscale:<login>')`, `access.identity` audit |
+| `src/proxy-headers.ts` | strips `tailscale-user-*` / `tailscale-app-capabilities` |
+| `src/control-routes.ts` | `POST /tailscale/{enable,disable,config,self-check}`; 409 state conflicts, 400 input, 502 CLI |
+| `src/persist.ts` | `tailscale` block, `normalizeTailscaleRoute`, defaults |
+| `src/client/TailscaleSection.tsx` | the panel group; `RemoteSection.tsx` mounts it and adds the second Tunnel target |
+| `tests/tailscale.test.ts`, `tests/identity.test.ts`, `tests/control.test.ts`, `tests/tailscale.client.test.tsx` | scripted CLI, identity gate (admit / spoof / strip), control routes with an injected manager, UI |
+
+**Test-suite trap:** `createRuntime` builds a real Tailscale manager, so
+`tests/control.test.ts` pins `tailscalePath: '/nonexistent/tailscale'` in its
+`makeConfig` — otherwise the suite shells out to the real CLI on this machine.
+
+### Using it (after installing the fork into the profile and restarting)
+
+1. Start proxy → **Tailscale → Enable route** (Protocol HTTP, Port 80).
+   Card shows *Route is active*, hint `Open http://tbwork/ from any device on
+   your tailnet.`; **Run self-check** should report HTTP 200.
+2. Phone on the tailnet: either scan an invite (its origin is now
+   `http://tbwork/`) — or tick **User-based auth**, enter `tali@symbolica.ai`,
+   **Save logins**, and just open `http://tbwork/` — no token, no invite.
+3. Both quick tunnel and Tailscale route can be active at once; identity auth
+   never applies to tunnel traffic (see trust conditions).
 
 ## Weekend flow (to do)
 
