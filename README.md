@@ -36,7 +36,30 @@ future agent can reproduce it — live in `recipes/` (index in `AGENTS.md`).
   symbol search across installed docsets, pages (or just the anchored section)
   as Markdown with MathML → LaTeX; launches Dash hidden and enables its API
   server on demand. Host-only, no MCP. See its README.
+- `enforce-model-preset` — bind agent presets to model selections: on a
+  committed `model/selection` event in a still-blank session, switch its preset
+  per a first-match rule table (`provider`/`model` → `preset`), so tiny local
+  models get tiny compositions instead of the ~8.3k-token standard toolbelt.
+  Host-only. Background: `recipes/apple-foundation-model-provider.md`.
+- `foreign-link-opener` — when the GUI runs as a Safari "Add to Dock" web app,
+  links that leave the DSH server (other ports, other hosts) open in the real
+  Safari via `open -a` instead of another DSH-branded window. Needed because a
+  web app's scope is host-only (the port is not part of it) and `window.open`
+  never leaves the app. Browser half intercepts clicks; host half runs `open`.
+- `local-model-supervisor` — host local model servers (AFM, llama.cpp, …) from
+  dsh itself: start on first `model/selection` for a carried provider, reuse
+  across sessions, adopt (and never kill) externally started instances, stop
+  owned servers once idle and unselected. Host-only.
+- `preview-identity` — red whale `/favicon.svg` + "DSH-dev" `/manifest.webmanifest`
+  (and `<title>`) for the preview/dev web server, so a Dock-installed preview
+  is distinguishable from the live instance. Load **only** in `cordis.dev.yml`.
 - `settings-shortcut` — ⌘. (Ctrl+. off macOS) toggles the web GUI's Settings
   panel in Chrome, Safari and the Dock-installed Safari web app. Browser-only.
   ⌘, is impossible in Safari (the app consumes it before the page sees it);
   its README records the real-keystroke verification.
+- `wolfram-kernel-supervisor` — per-chat Wolfram Language kernels
+  (`wl:<session>:<kernel>`) supervised over Mathematica's own AgentTools MCP
+  server: `wolfram_eval` / `wolfram_run` / `wolfram_show` (retina plots shown
+  inline to the user, `.wl` source written beside each PNG) / `wolfram_symbol` /
+  `wolfram_lint` / `wolfram_kernel_*` lifecycle tools. Host + browser halves;
+  no `mcp__*` names reach the model. See its README.
