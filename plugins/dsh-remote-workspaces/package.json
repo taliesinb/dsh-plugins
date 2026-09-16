@@ -2,29 +2,52 @@
   "name": "dsh-remote-workspaces",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: mirror workspaces of other DSH servers in this GUI — sessions render through a same-origin egress proxy (/remote/<server>/?embed=<session>) and are managed host-to-host over the remote's RPC. Needs the DSH branch feat/embed-session on the remote.",
+  "description": "DSH plugin: mirror workspaces of other DSH servers in this GUI \u2014 sessions render through a same-origin egress proxy (/remote/<server>/?embed=<session>) and are managed host-to-host over the remote's RPC. Needs the DSH branch feat/embed-session on the remote.",
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
   },
   "files": [
     "index.js",
     "egress.mjs",
     "state.mjs",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "lib/client.js",
+    "lib/client.js.map"
   ],
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
     }
   },
   "scripts": {
     "check": "node --check index.js && node --check egress.mjs && node --check state.mjs && node --test tests/*.test.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "prepare": "node build.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery"
+    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness-embed/vendor/schemastery"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:/Users/tali/github/deepseek-harness-embed/vendor/cordis",
+    "@deepseek-ai/dsh-client-connection": "link:/Users/tali/github/deepseek-harness-embed/packages/client/connection",
+    "@deepseek-ai/dsh-client-store": "link:/Users/tali/github/deepseek-harness-embed/packages/client/store",
+    "@deepseek-ai/dsh-client-ui-layout": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-layout",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-slots": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-slots",
+    "@deepseek-ai/dsh-client-ui-workspace": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-workspace",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
   }
 }

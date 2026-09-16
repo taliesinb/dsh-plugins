@@ -15,11 +15,18 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
 
 - **Phase 2 (done):** egress proxy (HTTP + WebSocket upgrade for `api/remote.mux`),
   auth bridge (tailnet identity, or standing token → cookie, re-exchanged on 401),
-  `Location` rewriting back under the mount, control channel `/remote-workspaces`
-  with `status` and `probe`. Verified with two local DSH instances: a remote session
-  renders and runs live turns inside an iframe of the local GUI.
-- **Phase 3 (next):** persisted registry mutations, sidebar rows, add-remote modal,
-  iframe pool, new-session / rename / archive.
+  `Location` rewriting back under the mount, control channel `/remote-workspaces`.
+- **Phase 3 (done):** persisted registry (`servers.probe`, `workspaces.add|poll|remove|
+  rename`, `sessions.rename|archive|start`) and the browser half: badged add button
+  (fork seat `sidebar.workspaces.headerAction`), remote groups below the local tree
+  (`sidebar.workspaces.extra`) with cached rows + spinners, ↻ / + / … actions,
+  add-remote modal (URL → probe → pick or new directory → name), keyed `main` panel
+  host + `shell.overlay` iframe pool (10 min hidden TTL, cap 4), reload restore.
+  Verified end to end with two local DSH instances; see
+  `../../recipes/remote-workspaces-plugin.md`.
+- **Not yet exercised:** a real `dsh-tailscale-remote` upstream over HTTPS in
+  identity mode. **Later:** title sync without ↻ (postMessage from the embed),
+  interleaving remote groups with local ones, remote workspace path browsing.
 
 ## Files
 
@@ -28,6 +35,7 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
 | `index.js` | Plugin entry: mounts `/remote/<id>` (prefix route) + `/remote/<id>/api/remote.mux` (upgrade route) per server, gated by DSH's own browser-session check; control channel. |
 | `egress.mjs` | One remote: URL facts, token exchange, header rewriting, request/upgrade forwarding, `call(ns, method, args)`. |
 | `state.mjs` | `$DSH_HOME/remote-workspaces.json` (0600): servers + mirrored workspaces with cached sessions. |
+| `src/client/{api,store}.ts`, `ui.tsx`, `index.tsx` | Browser half (built to `lib/client.js` by `build.mjs`): control-channel API, persisted view + runtime stores, components, slot registrations. |
 
 ## Config
 

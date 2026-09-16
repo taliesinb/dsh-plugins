@@ -58,7 +58,11 @@ function normalizeWorkspace(raw, serverIds) {
   const cache = typeof raw.cache === 'object' && raw.cache !== null ? raw.cache : {}
   const sessions = Array.isArray(cache.sessions)
     ? cache.sessions.flatMap(entry => (typeof entry === 'object' && entry !== null && typeof entry.id === 'string'
-      ? [{ id: entry.id, title: String(entry.title ?? ''), ...(typeof entry.updatedAt === 'string' ? { updatedAt: entry.updatedAt } : {}) }]
+      ? [{
+          id: entry.id, title: String(entry.title ?? ''),
+          ...(typeof entry.updatedAt === 'string' ? { updatedAt: entry.updatedAt } : {}),
+          ...(entry.running === true ? { running: true } : {}),
+        }]
       : []))
     : []
   return {
@@ -67,9 +71,14 @@ function normalizeWorkspace(raw, serverIds) {
     remoteWorkspaceId,
     title: String(raw.title ?? remoteWorkspaceId),
     remotePath: String(raw.remotePath ?? ''),
+    ...(typeof raw.remoteTitle === 'string' ? { remoteTitle: raw.remoteTitle } : {}),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date(0).toISOString(),
     order: Number.isFinite(raw.order) ? Number(raw.order) : 0,
-    cache: { sessions, ...(typeof cache.polledAt === 'string' ? { polledAt: cache.polledAt } : {}) },
+    cache: {
+      sessions,
+      ...(typeof cache.polledAt === 'string' ? { polledAt: cache.polledAt } : {}),
+      ...(cache.gone === true ? { gone: true } : {}),
+    },
   }
 }
 

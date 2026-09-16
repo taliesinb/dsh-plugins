@@ -284,11 +284,18 @@ memory only — irrelevant once the embed hides Settings.
    resources stayed under `/remote/rv/`; local GUI localStorage untouched.
    Not yet exercised: a real `dsh-tailscale-remote` upstream over HTTPS (identity
    mode + its slash-guard script) — first thing to try in phase 3 with a real peer.
-3. **Registry + control channel + sidebar rows** (wrap approach), manual add via
-   settings JSON first, then the modal.
-4. **Iframe pool + selection**; new-session flow with draft store; rename/archive.
-5. **Polish**: refresh badges, error remedies, fork slot for row interleaving,
-   `postMessage` title sync, recipe in `recipes/remote-workspaces-plugin.md`.
+3. + 4. **Registry, sidebar, modal, iframe pool, session ops** — **DONE 2026-09-16**.
+   Fork commit `ab58a76bda` (unary `workspace.list`; list seats
+   `sidebar.workspaces.headerAction` / `.extra` — the "fork slot" option, chosen over
+   wrapping the single slot). Plugin browser half in `src/client/`. New-session flow
+   deviates from the spec by design: the local shell itself creates/reuses a blank
+   session on the host when a workspace is opened, so `sessions.start` does the same
+   on the remote and frames the remote's own composer (its models/effort/attachments/
+   drafts). Recipe: `recipes/remote-workspaces-plugin.md`.
+5. **Polish (open)**: `postMessage` title sync so rows update without ↻; interleave
+   remote groups with local ones; remote directory browsing in the modal; test against
+   a real `dsh-tailscale-remote` upstream (identity mode, HTTPS); install into the
+   live profile once the live checkout is on `feat/embed-session`.
 
 ## 8. Open questions (resolve during phases 1–2)
 
