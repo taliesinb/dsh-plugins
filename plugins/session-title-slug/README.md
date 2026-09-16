@@ -70,9 +70,14 @@ Browser-only client plugin (`index.js` host half just logs).
    The plugin subscribes to `sessions.list` + `workspaces.list`; for every
    blank, non-current session with a non-empty persisted draft it inserts a
    `cloneNode` of a real session row (selection/drag/menu artefacts
-   stripped, `opacity: .5`, `data-tdsn-ghost`) right after the workspace
-   header's HoverCard wrapper, labelled with the draft's slug or the sidebar's
-   own localized "New Session" text. Click/Enter → `sessions.open(id)`; the
+   stripped, `opacity: .5`) inside a shallow clone of the row's HoverCard
+   wrapper (the group section spaces *wrappers*, so a bare row would sit
+   2px too high and shift every row below it), inserted right after the
+   workspace header's wrapper and marked `data-tdsn-ghost`; labelled with
+   the draft's slug or the sidebar's own localized "New Session" text.
+   Wrappers are detected structurally (the element holding exactly that one
+   row) because ui-primitives hashes its classes `_root_<hash>_<n>`, not
+   `[hash]_[local]`. Click/Enter → `sessions.open(id)`; the
    real blank row then renders and the ghost is reconciled away. Headers are
    matched by title text (rows carry no ids); only the grouped list is
    handled. Survives reloads, since both the session and the draft persist.

@@ -117,18 +117,30 @@ export function deriveGhosts(
 }
 
 /**
+ * A row's HoverCard wrapper: rows (header and session alike) are rendered
+ * inside HoverCard's block wrapper div, which is what the group section
+ * actually lays out (inter-row spacing lives between wrappers). Detected
+ * structurally — the wrapper holds exactly that one row (plus any ghost we
+ * parked there earlier) — because ui-primitives hashes its CSS-module classes
+ * differently (`_root_<hash>_<n>`) from the `[hash]_[local]` shell pattern.
+ */
+function wrapperOf(row: HTMLElement): HTMLElement | undefined {
+  const parent = row.parentElement
+  if (parent === null || parent.getAttribute('role') === 'tree') return undefined
+  const ownRows = [...parent.children].filter(child => !child.hasAttribute(GHOST_ATTR))
+  return ownRows.length === 1 && ownRows[0] === row ? parent : undefined
+}
+
+/**
  * Expanded Workspace header ANCHORS keyed by visible title: the element the
- * ghost is inserted after. Rows sit inside HoverCard's block wrapper
- * (`div[class$="_root"]`), so the anchor is that wrapper when present.
+ * ghost is inserted after (the header's wrapper when it has one).
  */
 function headersByTitle(): Map<string, HTMLElement> {
   const map = new Map<string, HTMLElement>()
   for (const header of document.querySelectorAll<HTMLElement>('[role="tree"] [role="treeitem"][aria-expanded="true"]')) {
     const title = header.querySelector('span[class$="_title"]')?.textContent?.trim()
     if (title === undefined || map.has(title)) continue
-    const parent = header.parentElement
-    const anchor = parent !== null && parent.matches('[class$="_root"]') ? parent : header
-    map.set(title, anchor)
+    map.set(title, wrapperOf(header) ?? header)
   }
   return map
 }
@@ -136,7 +148,7 @@ function headersByTitle(): Map<string, HTMLElement> {
 /** A real session row to clone for classes/geometry (never one of ours). */
 function templateRow(): HTMLElement | undefined {
   for (const row of document.querySelectorAll<HTMLElement>('[role="treeitem"][aria-selected]')) {
-    if (!row.hasAttribute(GHOST_ATTR)) return row
+    if (row.closest(`[${GHOST_ATTR}]`) === null) return row
   }
   return undefined
 }
@@ -149,7 +161,6 @@ function buildGhost(template: HTMLElement, ghost: Ghost, open: (sessionId: strin
   for (const token of [...el.classList]) {
     if (STRIP_CLASS_SUFFIXES.some(suffix => token.endsWith(suffix))) el.classList.remove(token)
   }
-  el.setAttribute(GHOST_ATTR, ghost.sessionId)
   el.setAttribute('aria-selected', 'false')
   el.removeAttribute('draggable')
   el.removeAttribute('id')
@@ -181,7 +192,18 @@ function buildGhost(template: HTMLElement, ghost: Ghost, open: (sessionId: strin
   el.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' || event.key === ' ') activate(event)
   })
-  return el
+  // Real rows sit inside HoverCard's block wrapper, and the group section
+  // spaces WRAPPERS; a bare row would lose that spacing and shift the rows
+  // below it. Clone the template's wrapper (shallow) so the ghost is laid
+  // out exactly like its neighbours.
+  const templateWrapper = wrapperOf(template)
+  const outer = templateWrapper === undefined ? el : (templateWrapper.cloneNode(false) as HTMLElement)
+  if (outer !== el) {
+    outer.removeAttribute('id')
+    outer.replaceChildren(el)
+  }
+  outer.setAttribute(GHOST_ATTR, ghost.sessionId)
+  return outer
 }
 
 /**
