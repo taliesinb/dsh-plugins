@@ -9,9 +9,10 @@
 #
 # Live profile owns: enforce-model-preset, browser-automation, dash-docsets,
 # local-model-supervisor, notion-mcp, wolfram-kernel-supervisor,
-# foreign-link-opener, settings-shortcut, tailscale-remote (2026-09-16; it
-# also binds 127.0.0.1:3083 and owns the /dsh serve route, so a preview must
-# not load it — or must set another listenPort/mountPath).
+# foreign-link-opener, settings-shortcut, session-introspect (2026-09-16),
+# tailscale-remote (2026-09-16; it also binds 127.0.0.1:3083 and owns the /dsh
+# serve route, so a preview must not load it — or must set another
+# listenPort/mountPath).
 # This overlay only adds what is NOT there: agent-status-indicator and the
 # preview-only red identity.
 #
@@ -22,14 +23,6 @@
 - insert:
     - id: tali-agent-status-indicator
       name: '/Users/tali/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
-    # Dash (macOS docs browser) tools: dash_list_docsets / dash_search / dash_get_page.
-    - id: tali-dash-docsets
-      name: '/Users/tali/github/tali-dash-plugins/plugins/dash-docsets/index.js'
-    # Cross-agent transcript introspection: transcript_find / _outline / _read /
-    # _tool_stats / _grep / _event over ctx.sessionQuery (all workspaces).
-    # Recipe: recipes/session-introspect-plugin.md
-    - id: tali-session-introspect
-      name: '/Users/tali/github/tali-dash-plugins/plugins/session-introspect/index.js'
     # Preview-only identity: red whale + "DSH-dev" so a Dock-installed preview
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity
