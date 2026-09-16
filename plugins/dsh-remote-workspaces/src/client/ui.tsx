@@ -49,20 +49,30 @@ const S = {
     position: 'absolute', right: 2, bottom: 2, width: 12, height: 12, borderRadius: 6, display: 'grid', placeItems: 'center',
     background: 'var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base))', color: 'var(--dsw-alias-state-business-primary)',
   } as CSSProperties,
-  group: { marginTop: 4 } as CSSProperties,
+  group: {} as CSSProperties,
+  // Mirrors ui-workspace Rows.module.css: .projectRow (34px, pad 0 8, gap 6),
+  // a 16x20 leading slot (folder, chevron on hover), hover-revealed actions
+  // (16px buttons, gap 12).
   groupRow: {
-    display: 'flex', alignItems: 'center', gap: 4, height: 32, padding: '0 4px 0 6px', borderRadius: 8, cursor: 'pointer',
-    userSelect: 'none', color: 'var(--dsw-alias-label-primary)', fontSize: 13,
+    display: 'flex', alignItems: 'center', gap: 6, height: 34, padding: '0 8px', borderRadius: 8, cursor: 'pointer',
+    userSelect: 'none', color: 'var(--dsw-alias-label-primary)', fontSize: 13, boxSizing: 'border-box',
   } as CSSProperties,
-  groupTitle: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 } as CSSProperties,
+  slot: { flex: 'none', width: 16, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', position: 'relative' } as CSSProperties,
+  groupTitle: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
+  rowActions: { flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 12, height: 20 } as CSSProperties,
+  rowButton: {
+    flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 16, height: 16, border: 'none',
+    borderRadius: 4, padding: 0, background: 'transparent', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer',
+  } as CSSProperties,
+  // .sessionRow: 32px, pad 0 8, a 16px status slot, then a 4px title gap (no extra indent under a group).
   sessionRow: {
-    display: 'flex', alignItems: 'center', gap: 6, height: 32, padding: '0 4px 0 30px', borderRadius: 8, cursor: 'pointer',
-    userSelect: 'none', color: 'var(--dsw-alias-label-primary)', fontSize: 13,
+    display: 'flex', alignItems: 'center', gap: 0, height: 32, padding: '0 8px', borderRadius: 8, cursor: 'pointer',
+    userSelect: 'none', color: 'var(--dsw-alias-label-primary)', fontSize: 13, boxSizing: 'border-box',
   } as CSSProperties,
-  sessionTitle: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
+  sessionTitle: { flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 6px 0 4px' } as CSSProperties,
   muted: { color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
-  error: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, padding: '2px 8px 4px 30px' } as CSSProperties,
-  hint: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, padding: '2px 8px 4px 30px' } as CSSProperties,
+  error: { color: 'var(--dsw-alias-state-error-primary)', fontSize: 12, padding: '2px 8px 4px 28px' } as CSSProperties,
+  hint: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 12, padding: '2px 8px 4px 28px' } as CSSProperties,
   field: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 14 } as CSSProperties,
   label: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } as CSSProperties,
   caption: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', lineHeight: 1.4 } as CSSProperties,
@@ -100,12 +110,32 @@ function IconButton({ label, onClick, children, disabled }: { label: string; onC
   )
 }
 
-/** Folder icon with the small "remote" globe badge — the row and button decoration. */
-function RemoteFolderIcon({ open }: { open: boolean }) {
+/** 16px row action button, like the local tree's `.iconButton`. */
+function RowButton({ label, onClick, children, disabled }: { label: string; onClick: () => void; children: ReactNode; disabled?: boolean }) {
+  const [hover, setHover] = useState(false)
   return (
-    <span style={{ position: 'relative', display: 'inline-flex', width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
+    <Tooltip label={label} delayMs={500}>
+      <button
+        type="button"
+        aria-label={label}
+        disabled={disabled}
+        style={{ ...S.rowButton, color: hover && !disabled ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)', opacity: disabled ? 0.5 : 1 }}
+        onMouseEnter={() => { setHover(true) }}
+        onMouseLeave={() => { setHover(false) }}
+        onClick={(event) => { event.stopPropagation(); onClick() }}
+      >
+        {children}
+      </button>
+    </Tooltip>
+  )
+}
+
+/** Folder icon with the small "remote" globe badge — the row and button decoration. */
+function RemoteFolderIcon({ open, active }: { open: boolean; active?: boolean }) {
+  return (
+    <span style={{ position: 'relative', display: 'inline-flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', color: active ? 'var(--dsw-alias-state-business-primary)' : undefined }}>
       {open ? <IconFolderOpen16 size={16} /> : <IconFolderClose16 size={16} />}
-      <span style={{ ...S.badge, right: -4, bottom: -3, width: 11, height: 11 }}><IconGlobeOutline14 size={9} /></span>
+      <span style={{ ...S.badge, right: -5, bottom: -4, width: 11, height: 11 }}><IconGlobeOutline14 size={9} /></span>
     </span>
   )
 }
@@ -172,27 +202,28 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { openRemoteSession({ workspaceId: workspace.id, sessionId: session.id }) }}
       >
-        {busy ? <Spinner /> : <span style={{ width: 14, display: 'inline-block' }} />}
+        <span style={S.slot}>{busy ? <Spinner /> : null}</span>
         <span style={S.sessionTitle} title={session.title || session.id}>
           {session.title || <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>}
         </span>
         {session.running === true && <span style={{ ...S.muted, fontSize: 11 }}>running</span>}
-        <span style={{ display: 'inline-flex', visibility: hover || menuOpen ? 'visible' : 'hidden' }} onClick={(event) => { event.stopPropagation() }}>
+        <span style={{ ...S.rowActions, display: hover || menuOpen ? 'inline-flex' : 'none' }} onClick={(event) => { event.stopPropagation() }}>
           <Menu
             open={menuOpen}
             items={items}
             onSelect={(id) => { void onSelect(id) }}
             onClose={() => { setMenuOpen(false) }}
             portal
+            closeOnPointerLeave
             align="end"
             anchor={(
               <button
                 type="button"
                 aria-label="Session actions"
-                style={{ ...S.iconButton, width: 24, height: 24 }}
+                style={S.rowButton}
                 onClick={(event) => { event.stopPropagation(); setMenuOpen(open => !open) }}
               >
-                <IconEllipsisOutline16 size={16} />
+                <IconEllipsisOutline16 />
               </button>
             )}
           />
@@ -268,38 +299,40 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime }: { w
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { model.setExpanded(workspace.id, !expanded) }}
       >
-        <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 120ms', color: 'var(--dsw-alias-label-tertiary)' }}>
-          <IconTriangleRightFill14 size={14} />
+        {/* Leading slot: the badged folder, swapped for the expand chevron on hover (local-tree pattern). */}
+        <span style={{ ...S.slot, color: 'var(--dsw-alias-label-caption)' }}>
+          {hover
+            ? <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ds-ease-in-out)' }}><IconTriangleRightFill14 /></span>
+            : <RemoteFolderIcon open={expanded} active={selected?.workspaceId === workspace.id} />}
         </span>
-        <RemoteFolderIcon open={expanded} />
         <span style={S.groupTitle}>{workspace.title}</span>
         {workspace.cache.gone === true && <span style={{ ...S.muted, fontSize: 11 }}>gone</span>}
-        {(hover || menuOpen) && (
-          <>
-            <IconButton label="Refresh from remote" disabled={polling} onClick={() => { void model.poll(workspace.id) }}>
-              {polling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
-            </IconButton>
-            <IconButton label="New remote session" disabled={starting || !expanded || workspace.cache.polledAt === undefined} onClick={() => { void start() }}>
-              {starting ? <Spinner /> : <IconPlusOutline16 size={16} />}
-            </IconButton>
-            <span style={{ display: 'inline-flex' }} onClick={(event) => { event.stopPropagation() }}>
-              <Menu
-                open={menuOpen}
-                items={items}
-                onSelect={onMenu}
-                onClose={() => { setMenuOpen(false) }}
-                portal
-                align="end"
-                anchor={(
-                  <button type="button" aria-label="Remote workspace actions" style={{ ...S.iconButton, width: 24, height: 24 }}
-                    onClick={(event) => { event.stopPropagation(); setMenuOpen(open => !open) }}>
-                    <IconEllipsisOutline16 size={16} />
-                  </button>
-                )}
-              />
-            </span>
-          </>
-        )}
+        {polling && !hover && <Spinner size={12} />}
+        <span style={{ ...S.rowActions, display: hover || menuOpen ? 'inline-flex' : 'none' }}>
+          <RowButton label="Refresh from remote" disabled={polling} onClick={() => { void model.poll(workspace.id) }}>
+            {polling ? <Spinner size={12} /> : <IconRefreshOutline16 />}
+          </RowButton>
+          <span style={{ display: 'inline-flex' }} onClick={(event) => { event.stopPropagation() }}>
+            <Menu
+              open={menuOpen}
+              items={items}
+              onSelect={onMenu}
+              onClose={() => { setMenuOpen(false) }}
+              portal
+              closeOnPointerLeave
+              align="end"
+              anchor={(
+                <button type="button" aria-label="Remote workspace actions" style={S.rowButton}
+                  onClick={(event) => { event.stopPropagation(); setMenuOpen(open => !open) }}>
+                  <IconEllipsisOutline16 />
+                </button>
+              )}
+            />
+          </span>
+          <RowButton label="New remote session" disabled={starting || !expanded || workspace.cache.polledAt === undefined} onClick={() => { void start() }}>
+            {starting ? <Spinner size={12} /> : <IconPlusOutline16 />}
+          </RowButton>
+        </span>
       </div>
       {expanded && (
         <div role="group">
@@ -369,7 +402,8 @@ export function RemoteGroups(props: PropsRuntime<'sidebar.workspaces.extra'> & F
   if (loadError !== undefined) return <div style={S.error}>Remote workspaces: {loadError}</div>
   if (workspaces === undefined || workspaces.length === 0) return null
   return (
-    <div data-remote-workspaces>
+    // Right inset matches the local list's reserved scrollbar gutter so rows share one right edge.
+    <div data-remote-workspaces style={{ paddingRight: 'calc(var(--dsh-session-list-scrollbar-width, 8px) + var(--dsh-session-list-scrollbar-offset, 2px) + 2px)' }}>
       {workspaces.map(workspace => <Group key={workspace.id} workspace={workspace} {...props} />)}
     </div>
   )
