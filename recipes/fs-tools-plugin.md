@@ -1,10 +1,10 @@
 # fs-tools plugin — batch `list_dir` / `read_many` / `edit_many` / `search` beside the built-ins
 
-Status: **built and verified 2026-09-16** (18 tests, three headless runs against
-a throwaway home with the real observation policy); mounted in the **dev
-overlay** (`cordis.dev.yml`) only — **not yet in the live web profile** (one
-`insert` row in `~/.dsh/profiles/web/cordis.patch.yml`, hot-reloading, waits
-for an explicit go-ahead). Plugin README:
+Status: **built, verified and live 2026-09-16** (18 tests, three headless runs
+against a throwaway home with the real observation policy); mounted in the
+**live web profile** (`~/.dsh/profiles/web/cordis.patch.yml`, row
+`tali-fs-tools`, absolute-path `name` like the other rows — hot-reloaded on
+save, on Tali's go-ahead) and therefore NOT repeated in `cordis.dev.yml`. Plugin README:
 [`plugins/fs-tools/README.md`](../plugins/fs-tools/README.md).
 
 ## 0. Why
@@ -112,8 +112,6 @@ Source of truth for this: `<dsh-src>/packages/fs/tool-fs/src/{read,edit}.ts`,
 
 ## 4. Not done / next
 
-- **Live profile**: add `- id: tali-fs-tools` + `name: tali-fs-tools` (after
-  `dsh plugin --profile web add ./plugins/fs-tools`) — hot-reloads; ask first.
 - **Adoption measurement**: after a week, `transcript_tool_stats sessions:["*"] since:"7d"`
   and the `classify.py` categories (`~/projects/deepseek-harness/rsi-validate/`)
   — do `py_edit`, `sed_range`, `ls`, `grep_search` drop?

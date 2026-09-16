@@ -121,9 +121,10 @@ Dev overlay (already a row in `<plugins>/cordis.dev.yml`):
 cd <dsh-src> && pnpm dsh web --patch <plugins>/cordis.dev.yml
 ```
 
-Installed bundle: `dsh plugin --profile web add ./plugins/fs-tools` (its
-`cordis.patch.yml` inserts the row `tali-fs-tools`). **Not** in the live web
-profile yet — that is a hot-reloading change and waits for an explicit go-ahead.
+Live web profile: an absolute-path row `tali-fs-tools` in
+`~/.dsh/profiles/web/cordis.patch.yml` (mounted 2026-09-16). Installed-bundle
+alternative: `dsh plugin --profile web add ./plugins/fs-tools` (its
+`cordis.patch.yml` inserts the same row id).
 
 ## Tests
 
