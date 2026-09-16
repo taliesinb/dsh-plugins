@@ -40,9 +40,11 @@
  *       maxChars: 120000      # truncate returned page content beyond this (full text saved to a file)
  *   chrome:
  *     enabled: true
- *     command: /opt/homebrew/bin/chrome-devtools-mcp   # npm i -g chrome-devtools-mcp
+ *     command: ''             # '' = the chrome-devtools-mcp pinned in this plugin's package.json (run with the host's node);
+ *                             #      a path overrides it (e.g. /opt/homebrew/bin/chrome-devtools-mcp from npm i -g)
  *     headless: false
  *     hideAutomationBanner: true                       # drop --enable-automation (no infobar)
+ *     quietStderr: true                                # drop chrome-devtools-mcp's launch boilerplate from stderr
  *     args: []                                         # extra chrome-devtools-mcp flags
  *   subagents: true           # also give delegated child agents the tools (each its own session)
  *   idleMinutes: 30           # close a session's windows after this long without a tool call (0 = never)
@@ -51,11 +53,15 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, existsSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { createRequire } from 'node:module'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { createTools } from './curated-tools.mjs'
 import { createReaderPool } from './reader-pool.mjs'
-import { safariInstance } from './servers.mjs'
+import { CHROME_STDERR_NOISE, safariInstance } from './servers.mjs'
 import { BrowserSessions } from './windows.mjs'
 
 export const name = 'browser-automation'
@@ -76,9 +82,10 @@ export const Config = Schema.object({
   }).default({}),
   chrome: Schema.object({
     enabled: Schema.boolean().default(true),
-    command: Schema.string().default('/opt/homebrew/bin/chrome-devtools-mcp'),
+    command: Schema.string().default(''),
     headless: Schema.boolean().default(false),
     hideAutomationBanner: Schema.boolean().default(true),
+    quietStderr: Schema.boolean().default(true),
     args: Schema.array(String).default([]),
   }).default({}),
   subagents: Schema.boolean().default(true),
@@ -101,15 +108,61 @@ function pluginNotice(text) {
   return { id: randomUUID(), role: 'user', content: [{ type: 'text', text }], source: PLUGIN_SOURCE }
 }
 
-/** Chrome server arguments derived from config (always an isolated profile). */
+/**
+ * The chrome-devtools-mcp to run: `{ command, args }` prefix for the spawn, plus a description for
+ * messages. Default (`chrome.command: ''`) is the version pinned in this plugin's package.json — its bin
+ * script run by the host's own node (`process.execPath`), so no global install, PATH or shebang is
+ * involved and `pnpm install` in the plugin directory is the whole upgrade procedure. A non-empty
+ * `chrome.command` is an executable path and is used verbatim (the previous `npm i -g` arrangement).
+ * @returns {{ command: string, args: string[], describe: string, missing?: string }}
+ */
+export function chromeServer(config) {
+  if (config.chrome.command !== '') {
+    return existsSync(config.chrome.command)
+      ? { command: config.chrome.command, args: [], describe: config.chrome.command }
+      : { command: config.chrome.command, args: [], describe: config.chrome.command, missing: `no chrome-devtools-mcp at "${config.chrome.command}" (chrome.command). Install it with \`npm i -g chrome-devtools-mcp\`, or set chrome.command to '' to use the version bundled with the plugin` }
+  }
+  let packageJson
+  try {
+    packageJson = createRequire(import.meta.url).resolve('chrome-devtools-mcp/package.json')
+  } catch {
+    return { command: process.execPath, args: [], describe: 'bundled chrome-devtools-mcp', missing: 'the bundled chrome-devtools-mcp is not installed: run `pnpm install` in the plugin directory (or set chrome.command to a global install)' }
+  }
+  const bin = join(dirname(packageJson), 'build/src/bin/chrome-devtools-mcp.js')
+  const version = (() => { try { return JSON.parse(readFileSync(packageJson, 'utf8')).version } catch { return '?' } })()
+  return { command: process.execPath, args: [bin], describe: `bundled chrome-devtools-mcp ${version}`, ...(existsSync(bin) ? {} : { missing: `bundled chrome-devtools-mcp ${version} has no bin at ${bin}` }) }
+}
+
+/**
+ * Chrome server arguments derived from config (always an isolated profile). `--no-performance-crux`:
+ * the plugin exposes no performance tools, and the flag also silences the CrUX notice on launch.
+ */
 export function chromeArgs(config) {
   return [
+    ...chromeServer(config).args,
     '--isolated',
     '--no-usage-statistics',
+    '--no-performance-crux',
     ...(config.chrome.headless ? ['--headless'] : []),
     ...(config.chrome.hideAutomationBanner ? ['--ignoreDefaultChromeArg=--enable-automation'] : []),
     ...config.chrome.args,
   ]
+}
+
+/**
+ * Environment for a chrome-devtools-mcp child (merged over the MCP SDK's safe default set).
+ * - CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: no "Update available" banner and no daily `npm view`
+ *   subprocess (utils/check-for-updates.js); the version is pinned in package.json.
+ * - NODE_OPTIONS --localstorage-file: the server touches `localStorage` (devtools/DevtoolsUtils.js);
+ *   Node ≥ 22 prints an ExperimentalWarning per launch unless a backing file is named. One 4 kB file per
+ *   session under the temp dir, removed when the instance closes.
+ * @param {string} localStorageFile - absolute path for Node's localStorage backing file.
+ */
+export function chromeEnv(localStorageFile) {
+  return {
+    CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1',
+    NODE_OPTIONS: `--localstorage-file=${localStorageFile}`,
+  }
 }
 
 /**
@@ -127,8 +180,9 @@ export function preflightFor(config) {
       return
     }
     if (!config.chrome.enabled) throw new Error('Chrome automation is disabled in this deployment (chrome.enabled=false).')
-    if (!existsSync(config.chrome.command)) {
-      throw new Error(`Chrome automation is unavailable: no chrome-devtools-mcp at "${config.chrome.command}". Install it with \`npm i -g chrome-devtools-mcp\` (and Google Chrome), or use the safari_* tools.`)
+    const server = chromeServer(config)
+    if (server.missing !== undefined) {
+      throw new Error(`Chrome automation is unavailable: ${server.missing}. Google Chrome must also be installed. Or use the safari_* tools.`)
     }
   }
 }
@@ -171,12 +225,26 @@ export function apply(ctx, config) {
       clientName: `${chatLabel(session.agent)} · s:${session.index}:${windowIndex}`,
       cwd: session.agent.session.header?.cwd,
     }),
-    chromeSpec: (session) => ({
-      command: config.chrome.command,
-      args: chromeArgs(config),
-      clientName: `${chatLabel(session.agent)} · c:${session.index}`,
-      cwd: session.agent.session.header?.cwd,
-    }),
+    chromeSpec: (session) => {
+      const cwd = session.agent.session.header?.cwd
+      const localStorageFile = join(tmpdir(), `dsh-chrome-${process.pid}-${session.index}-localstorage.json`)
+      const label = `chrome-devtools-mcp c:${session.index}`
+      return {
+        command: chromeServer(config).command,
+        args: chromeArgs(config),
+        clientName: `${chatLabel(session.agent)} · c:${session.index}`,
+        cwd,
+        env: chromeEnv(localStorageFile),
+        roots: cwd !== undefined ? [cwd] : [],
+        // Boilerplate is dropped (CHROME_STDERR_NOISE); anything else the server says is worth a log line.
+        ...(config.chrome.quietStderr ? { stderrNoise: CHROME_STDERR_NOISE } : {}),
+        onStderr: (line) => {
+          ctx.logger.warn(`browser-automation: ${label}: ${line}`)
+          trace({ event: 'chrome-stderr', session: session.index, line })
+        },
+        dispose: () => rm(localStorageFile, { force: true }).catch(() => {}),
+      }
+    },
     timeoutMs: config.toolCallTimeoutMs,
     idleMs: config.idleMinutes * 60_000,
     onIdleClose: (agent, closed) => {
@@ -222,7 +290,7 @@ export function apply(ctx, config) {
 
   /** Admitted inline screenshots awaiting finalizeContent, keyed by execution. */
   const inlineImages = new WeakMap()
-  const deps = { sessions, readerPool, admitImage, inlineImages, preflight, limits: { maxChars: config.safari.reader.maxChars } }
+  const deps = { sessions, readerPool, admitImage, inlineImages, preflight, limits: { maxChars: config.safari.reader.maxChars, timeoutMs: config.toolCallTimeoutMs } }
 
   /** Plugin-owned disposer of each attached agent's scoped tool registrations. */
   const attached = new Map()

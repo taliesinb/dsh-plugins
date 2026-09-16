@@ -13,8 +13,57 @@
 
 import { execFile, execFileSync } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { basename } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+
+/**
+ * stderr lines chrome-devtools-mcp 1.8.0 prints on every launch that carry no information for the
+ * operator (index.js `logDisclaimers`, utils/check-for-updates.js, Node's localStorage warning, the
+ * roots notice). The disclaimer has no opt-out flag, so the plugin pipes the child's stderr and drops
+ * these; everything else is forwarded (see connectServer `onStderr`).
+ */
+export const CHROME_STDERR_NOISE = [
+  /^chrome-devtools-mcp exposes content of the browser instance/,
+  /^debug, and modify any data in the browser or DevTools\.?$/,
+  /^Avoid sharing sensitive or personal information/,
+  /^Performance tools may send trace URLs to the Google CrUX API/,
+  /^Google collects usage statistics to improve Chrome DevTools MCP/,
+  /^For more details, visit: https:\/\/github\.com\/ChromeDevTools\/chrome-devtools-mcp/,
+  /^Update available: \d/,
+  /^Run `npm install chrome-devtools-mcp@latest` to update\./,
+  /ExperimentalWarning: localStorage is not available/,
+  /^\(Use `node --trace-warnings \.\.\.` to show where the warning was created\)/,
+  /^\[chrome-devtools-mcp\] The connecting client did not negotiate the MCP roots capability/,
+]
+
+/** True when a stderr line is known launch boilerplate (or blank). */
+export function isNoiseLine(line, patterns) {
+  const trimmed = line.trim()
+  if (trimmed === '') return true
+  return patterns.some(pattern => pattern.test(trimmed))
+}
+
+/**
+ * Split a byte stream into lines and hand each to `onLine` (the trailing partial line on close too).
+ * @param {import('node:stream').Readable} stream
+ * @param {(line: string) => void} onLine
+ */
+export function readLines(stream, onLine) {
+  let rest = ''
+  stream.setEncoding('utf8')
+  stream.on('data', (chunk) => {
+    rest += chunk
+    let index
+    while ((index = rest.indexOf('\n')) >= 0) {
+      onLine(rest.slice(0, index).replace(/\r$/, ''))
+      rest = rest.slice(index + 1)
+    }
+  })
+  stream.on('end', () => { if (rest !== '') onLine(rest) })
+}
 
 const STP_PROCESS = 'Contents/MacOS/Safari Technology Preview'
 
@@ -78,20 +127,40 @@ export const safariInstance = new SafariInstanceOwner()
 
 /**
  * Spawn one MCP server and complete the handshake.
- * @param {{ command: string, args: string[], clientName: string, cwd?: string, timeoutMs: number, safari?: boolean, onClose?: () => void, onError?: (error: unknown) => void }} options
+ *
+ * stderr: with `onStderr` the child's stderr is piped, lines matching `stderrNoise` are dropped and the
+ * rest go to the callback (the operator's terminal stays quiet; genuine complaints still surface). Without
+ * it the child inherits our stderr as before.
+ *
+ * roots: when given, the client declares the MCP `roots` capability and answers `roots/list` with these
+ * directories. chrome-devtools-mcp otherwise warns on every launch and confines its file-writing tools to
+ * the temp dir (index.js `oninitialized`); negotiating roots is the quiet alternative to
+ * `--allow-unrestricted-paths` and keeps writes scoped to the session's cwd (+ the server's own temp dir).
+ *
+ * @param {{ command: string, args: string[], clientName: string, cwd?: string, env?: Record<string, string>, roots?: string[], timeoutMs: number, safari?: boolean, onClose?: () => void, onError?: (error: unknown) => void, onStderr?: (line: string) => void, stderrNoise?: RegExp[] }} options
  * @returns {Promise<ServerConnection>}
  */
 export async function connectServer(options) {
   if (options.safari) safariInstance.acquire()
   let released = false
   const release = () => { if (!released && options.safari) { released = true; safariInstance.release() } }
+  const pipeStderr = typeof options.onStderr === 'function'
   const transport = new StdioClientTransport({
     command: options.command,
     args: options.args,
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    stderr: 'inherit',
+    ...(options.env !== undefined ? { env: options.env } : {}), // merged over the SDK's safe default set (HOME, PATH, …)
+    stderr: pipeStderr ? 'pipe' : 'inherit',
   })
-  const client = new Client({ name: options.clientName, version: '0.1.0' })
+  if (pipeStderr) {
+    const noise = options.stderrNoise ?? []
+    readLines(transport.stderr, (line) => { if (!isNoiseLine(line, noise)) options.onStderr(line) })
+  }
+  const roots = (options.roots ?? []).filter(root => typeof root === 'string' && root !== '')
+  const client = new Client({ name: options.clientName, version: '0.1.0' }, roots.length > 0 ? { capabilities: { roots: { listChanged: false } } } : undefined)
+  if (roots.length > 0) {
+    client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots: roots.map(root => ({ uri: pathToFileURL(root).href, name: basename(root) || root })) }))
+  }
   let closed = false
   transport.onclose = () => { closed = true; release(); options.onClose?.() }
   transport.onerror = (error) => { options.onError?.(error) }
@@ -139,6 +208,34 @@ export function imageOf(result) {
   const block = (result.content ?? []).find(candidate => candidate.type === 'image' && typeof candidate.data === 'string')
   if (block === undefined) return undefined
   return { data: new Uint8Array(Buffer.from(block.data, 'base64')), mediaType: block.mimeType ?? 'image/png' }
+}
+
+/**
+ * One-line inventory of an MCP result's content blocks, for error messages:
+ * `text ×2, image ×1 (image/png, 12345 base64 chars)`; `(no content blocks)` when empty.
+ */
+export function describeBlocks(result) {
+  const blocks = result?.content ?? []
+  if (blocks.length === 0) return '(no content blocks)'
+  const counts = new Map()
+  for (const block of blocks) {
+    const type = typeof block?.type === 'string' ? block.type : 'unknown'
+    const detail = type === 'image' ? ` (${block.mimeType ?? 'no mimeType'}, ${typeof block.data === 'string' ? `${block.data.length} base64 chars` : 'no data'})` : ''
+    const key = `${type}${detail}`
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return [...counts].map(([key, count]) => count > 1 ? key.replace(/^(\w+)/, `$1 ×${count}`) : key).join(', ')
+}
+
+/**
+ * Path from chrome-devtools-mcp's "Saved screenshot to <path>." line (its
+ * take_screenshot writes captures ≥ 2 MB — or any capture when `filePath` is
+ * passed — to disk instead of attaching an image block; screenshot.js:256 in
+ * 1.8.0). Undefined when the text has no such line.
+ */
+export function savedFileOf(text) {
+  const match = /Saved (?:screenshot|file|output) to (.+?)\.?\s*$/m.exec(text ?? '')
+  return match?.[1]
 }
 
 /**

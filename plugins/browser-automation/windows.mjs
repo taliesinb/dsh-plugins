@@ -31,7 +31,7 @@ export class BrowserSessions {
   /**
    * @param {object} options
    * @param {(session: Session, windowIndex: number) => { command: string, args: string[], clientName: string }} options.safariSpec
-   * @param {(session: Session) => { command: string, args: string[], clientName: string }} options.chromeSpec
+   * @param {(session: Session) => { command: string, args: string[], clientName: string, cwd?: string, env?: Record<string, string>, roots?: string[], onStderr?: (line: string) => void, stderrNoise?: RegExp[], dispose?: () => unknown }} options.chromeSpec - connectServer options plus `dispose`, run when the instance's process ends.
    * @param {number} options.timeoutMs - per MCP call.
    * @param {number} options.idleMs - 0 disables idle closing.
    * @param {(agent: object, closed: string[]) => void} options.onIdleClose
@@ -157,10 +157,12 @@ export class BrowserSessions {
   async chromeInstance(session) {
     if (session.chrome.conn !== undefined && !session.chrome.conn.closed) return session.chrome.conn
     const spec = this.options.chromeSpec(session)
+    const { dispose, ...serverSpec } = spec
     const conn = await connectServer({
-      ...spec,
+      ...serverSpec,
       timeoutMs: this.options.timeoutMs,
       onClose: () => {
+        void dispose?.() // per-instance scratch (Node localStorage file); runs for our close() and for crashes alike
         if (session.chrome.conn === conn) {
           session.chrome.conn = undefined
           session.chrome.pages.clear()

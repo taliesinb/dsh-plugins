@@ -17,6 +17,28 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: link:/Users/tali/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk
         version: link:../../../deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk
+      chrome-devtools-mcp:
+        specifier: 1.9.0
+        version: 1.9.0
       sharp:
         specifier: link:/Users/tali/github/deepseek-harness/node_modules/.pnpm/sharp@0.35.3_@types+node@22.20.0/node_modules/sharp
         version: link:../../../deepseek-harness/node_modules/.pnpm/sharp@0.35.3_@types+node@22.20.0/node_modules/sharp
+
+packages:
+
+  chrome-devtools-mcp@1.9.0:
+    resolution: {integrity: sha512-RnzXoJiUQ44hpOihWk90uOhLD/CnwDkDy0ldHMZONJ2nYQ+dWN1fq1luHHqyd+7FuYnyIlCY6uTThbN5ut9kSQ==}
+    engines: {node: ^20.19.0 || ^22.12.0 || >=23}
+    hasBin: true
+    peerDependencies:
+      '@blackwell-systems/gcf': ^2.2.2
+      '@toon-format/toon': ^4.1.0
+    peerDependenciesMeta:
+      '@blackwell-systems/gcf':
+        optional: true
+      '@toon-format/toon':
+        optional: true
+
+snapshots:
+
+  chrome-devtools-mcp@1.9.0: {}
