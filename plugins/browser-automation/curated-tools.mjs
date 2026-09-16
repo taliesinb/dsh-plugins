@@ -9,13 +9,13 @@
  * zero-or-one rule when it is omitted).
  */
 
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, resolve as resolvePath } from 'node:path'
+import { basename, dirname, extname, join, resolve as resolvePath } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { CHROME_FORMATS, chromeReadCall } from './chrome-read.mjs'
 import { describeCollapsed, extractPage, FORMATS, planRead, renderStructure, SCOPES, STRUCTURE_SCRIPT } from './page-read.mjs'
-import { imageOf, parseJsonText } from './servers.mjs'
+import { describeBlocks, imageOf, parseJsonText, savedFileOf, textOf } from './servers.mjs'
 import { cropBox, cropImage, imageSize, measureScript, parseMeasurement, readPng, rectMoved } from './safari-screenshot.mjs'
 import { canonicalWatchUrl, EXTRACT_SCRIPT, renderNotes, shapeNotes } from './youtube-notes.mjs'
 
@@ -43,7 +43,7 @@ const tagged = (id, opened, text) => `${opened ? `Opened ${id}. ` : ''}[${id}]\n
  * @param {(exec: object, bytes: Uint8Array, name: string) => Promise<{ ref?: object, reason?: string }>} deps.admitImage
  * @param {WeakMap<object, object>} deps.inlineImages
  * @param {(browser: 'safari' | 'chrome') => void} deps.preflight
- * @param {{ maxChars: number }} deps.limits
+ * @param {{ maxChars: number, timeoutMs?: number }} deps.limits - page-read clamp and the per-MCP-call timeout (quoted in timeout failures).
  * @param {object} fallbackAgent - the agent these tools are registered for (used when an execution carries no agent).
  * @returns {object[]} tool definitions
  */
@@ -397,29 +397,45 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
   async function captureSafari(exec, args) {
     const { id, conn, opened } = await safari(exec, args.windowId)
     const viewportPath = join(tmpdir(), `dsh-safari-shot-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}.png`)
-    const shot = async () => { await conn.callText('screenshot', { savePath: viewportPath, ...(args.querySelector ? {} : { full_page: args.fullPage === true }) }) }
-    if (args.querySelector === undefined || args.querySelector === '') {
+    const target = args.querySelector ? `element ${JSON.stringify(args.querySelector)}` : args.fullPage === true ? 'full page' : 'viewport'
+    // Apple's `screenshot` answers with text only and writes the PNG to savePath; a success reply with no
+    // file (seen when the window is mid-navigation or has no page) would otherwise surface as sharp's
+    // opaque "Input file is missing".
+    const shot = async () => {
+      const reply = await conn.callText('screenshot', { savePath: viewportPath, ...(args.querySelector ? {} : { full_page: args.fullPage === true }) })
+      const written = await stat(viewportPath).catch(() => undefined)
+      if (written === undefined || written.size === 0) {
+        throw new Error(`safari screenshot of ${target} in ${id}: safaridriver reported success but wrote ${written === undefined ? 'no file' : 'an empty file'} at ${viewportPath}. Its reply was: ${reply || '(empty)'}. Is a page loaded in this window (safari_navigate first)?`)
+      }
+      return written.size
+    }
+    try {
+      if (args.querySelector === undefined || args.querySelector === '') {
+        const byteLength = await shot()
+        const size = await imageSize(viewportPath)
+        return { windowId: id, opened, bytes: await readPng(viewportPath), width: size.width, height: size.height, fullPage: args.fullPage === true, byteLength }
+      }
+      const measure = async (scroll) => parseMeasurement(await conn.callText('evaluate_javascript', { expression: measureScript(args.querySelector, scroll) }))
+      const before = await measure(args.scrollTo !== false)
       await shot()
+      let after = await measure(false)
+      let unstable = false
+      if (rectMoved(before.rect, after.rect)) {
+        await shot()
+        const again = await measure(false)
+        unstable = rectMoved(after.rect, again.rect)
+        after = again
+      }
       const size = await imageSize(viewportPath)
-      return { windowId: id, opened, bytes: await readPng(viewportPath), width: size.width, height: size.height, fullPage: args.fullPage === true }
-    }
-    const measure = async (scroll) => parseMeasurement(await conn.callText('evaluate_javascript', { expression: measureScript(args.querySelector, scroll) }))
-    const before = await measure(args.scrollTo !== false)
-    await shot()
-    let after = await measure(false)
-    let unstable = false
-    if (rectMoved(before.rect, after.rect)) {
-      await shot()
-      const again = await measure(false)
-      unstable = rectMoved(after.rect, again.rect)
-      after = again
-    }
-    const size = await imageSize(viewportPath)
-    const box = cropBox(after.rect, after.viewport, size)
-    return {
-      windowId: id, opened, bytes: await cropImage(viewportPath, box), width: box.width, height: box.height, querySelector: args.querySelector,
-      rect: { x: Math.round(after.rect.x), y: Math.round(after.rect.y), width: Math.round(after.rect.width), height: Math.round(after.rect.height) },
-      viewport: after.viewport, scale: Number(box.scale.toFixed(3)), clipped: box.clipped, settled: before.settled, unstable,
+      const box = cropBox(after.rect, after.viewport, size)
+      const bytes = await cropImage(viewportPath, box)
+      return {
+        windowId: id, opened, bytes, width: box.width, height: box.height, querySelector: args.querySelector, byteLength: bytes.byteLength,
+        rect: { x: Math.round(after.rect.x), y: Math.round(after.rect.y), width: Math.round(after.rect.width), height: Math.round(after.rect.height) },
+        viewport: after.viewport, scale: Number(box.scale.toFixed(3)), clipped: box.clipped, settled: before.settled, unstable,
+      }
+    } finally {
+      void rm(viewportPath, { force: true }).catch(() => {})
     }
   }
 
@@ -600,18 +616,76 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
     format: { type: 'string', enum: ['png', 'jpeg', 'webp'], description: 'Image format (default png).' },
     quality: { type: 'number', description: 'jpeg/webp quality 0–100.' },
   }
+  /**
+   * One Chrome capture. chrome-devtools-mcp's take_screenshot has two success shapes: an image block, or
+   * — for captures ≥ 2 MB (screenshot.js:256 in 1.8.0; a retina viewport of a colourful page easily
+   * exceeds it) — a text-only reply "Took a screenshot of …\nSaved screenshot to <tmp path>." with the
+   * bytes on disk. Both are read here; every other shape is reported with the server's exact reply so
+   * the caller can tell a bad request (stale uid, uid+fullPage) from a server-side change.
+   */
   async function captureChrome(exec, args) {
+    const wanted = args.uid !== undefined ? 'element' : args.fullPage === true ? 'fullPage' : 'viewport'
+    const target = wanted === 'element' ? `element uid ${JSON.stringify(args.uid)}` : wanted === 'fullPage' ? 'full page' : 'viewport'
+    if (wanted === 'element' && args.fullPage === true) throw new Error(`chrome screenshot: pass either uid (one element) or fullPage (whole page), not both (got uid ${JSON.stringify(args.uid)} and fullPage: true).`)
     const { id, pageId, conn, opened } = await chrome(exec, args.windowId)
     const { windowId: _w, path: _p, ...rest } = args
     const result = await conn.callRaw('take_screenshot', { ...rest, pageId })
+    const reply = textOf(result)
+    if (result.isError) throw new Error(`chrome screenshot of ${target} in ${id} failed. chrome-devtools-mcp said: ${reply || '(no message)'}`)
     const image = imageOf(result)
-    if (result.isError || image === undefined) throw new Error(`chrome screenshot failed: ${result.content?.map(b => b.text ?? '').join(' ') || 'no image returned'}`)
-    return { windowId: id, opened, bytes: image.data, mediaType: image.mediaType, ...(args.uid !== undefined ? { uid: args.uid } : {}), fullPage: args.fullPage === true }
+    let bytes, mediaType, source
+    if (image !== undefined) {
+      ({ data: bytes, mediaType } = image)
+      source = 'inline'
+    } else {
+      const saved = savedFileOf(reply)
+      if (saved === undefined) {
+        throw new Error(`chrome screenshot of ${target} in ${id}: chrome-devtools-mcp returned neither an image block nor a "Saved screenshot to <path>" line, so there is nothing to show. Reply blocks: ${describeBlocks(result)}. Reply text: ${reply || '(empty)'}`)
+      }
+      try {
+        bytes = new Uint8Array(await readFile(saved))
+      } catch (error) {
+        throw new Error(`chrome screenshot of ${target} in ${id}: chrome-devtools-mcp wrote the capture to ${saved} (it spills captures ≥ 2 MB to disk) but the file could not be read back: ${error.code ?? error.message}. Full reply: ${reply}`, { cause: error })
+      }
+      mediaType = mediaTypeOfPath(saved, args.format)
+      source = 'file'
+      void removeServerTempFile(saved)
+    }
+    if (bytes.byteLength === 0) throw new Error(`chrome screenshot of ${target} in ${id}: the server returned a 0-byte image (source: ${source}). Reply: ${reply || '(empty)'}`)
+    const notes = []
+    // The server states what it captured; a mismatch with the request is the one thing worth flagging loudly.
+    const captured = /screenshot of node with uid/i.test(reply) ? 'element' : /full current page/i.test(reply) ? 'fullPage' : /viewport/i.test(reply) ? 'viewport' : undefined
+    if (captured !== undefined && captured !== wanted) notes.push(`requested ${target} but chrome-devtools-mcp reports it captured the ${captured === 'fullPage' ? 'full page' : captured}: "${reply.split('\n')[0]}"`)
+    return {
+      windowId: id, opened, bytes, mediaType, ...(args.uid !== undefined ? { uid: args.uid } : {}), fullPage: args.fullPage === true,
+      byteLength: bytes.byteLength, format: mediaType.replace('image/', ''), source, ...(notes.length > 0 ? { notes } : {}),
+    }
+  }
+
+  /** Media type of a saved screenshot from its extension (falling back to the requested format). */
+  function mediaTypeOfPath(path, format) {
+    const ext = extname(path).toLowerCase()
+    if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+    if (ext === '.webp') return 'image/webp'
+    if (ext === '.png') return 'image/png'
+    return format === 'jpeg' ? 'image/jpeg' : format === 'webp' ? 'image/webp' : 'image/png'
+  }
+
+  /** Best-effort removal of a chrome-devtools-mcp temp capture and its per-call mkdtemp directory. */
+  async function removeServerTempFile(path) {
+    try {
+      await rm(path, { force: true })
+      const dir = dirname(path)
+      // getTempFilePath() = mkdtemp(<tmp>/chrome-devtools-mcp-XXXXXX)/<file>: one directory per capture.
+      if (basename(dir).startsWith('chrome-devtools-mcp-')) await rm(dir, { recursive: true, force: true })
+    } catch {
+      // The file belongs to the server's temp dir; leaving it behind is harmless.
+    }
   }
 
   tools.push(defineTool({
     name: 'chrome_get_screenshot',
-    description: 'Screenshot of this chat\'s Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from chrome_snapshot).',
+    description: 'Screenshot of this chat\'s Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from chrome_snapshot; uids expire when the page changes — re-snapshot first). Large captures are handled transparently; format: "jpeg" or a uid crop keeps them small.',
     parameters: chromeShotParams,
     output: objectOutput(describeShot),
     async execute(args, exec) {
@@ -799,7 +873,9 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
           }
           report.push(`${label} → ok`)
         } catch (error) {
-          report.push(`${label} → FAILED: ${String(error).replace(/^Error: /, '')}`)
+          // Server-tool prefix ("hover: Error: …") kept for provenance; a matching remedy is appended so a
+          // stale-uid failure tells the model to re-snapshot instead of retrying the same uid.
+          report.push(`${label} → FAILED: ${withHint(String(error).replace(/^Error: /, '')).replace('\nHint: ', ' — Hint: ')}`)
         }
       }
       let text = report.join('\n')
@@ -864,9 +940,19 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
   // `undefined`-valued key is exactly that. Several results carry optional fields taken straight from
   // arguments or server answers (`uid: args.uid`, `title: nav?.title`), so strip them centrally instead of
   // relying on every site to spread conditionally. (Tests call execute() directly, bypassing DSH's check.)
+  //
+  // The same wrapper turns every failure into a message the model can act on (see explainFailure): the
+  // curated tool and the server tool that failed, the browser server's own words, an interpretation of
+  // MCP-SDK timeouts, and a remedy for the failure shapes we have seen in sessions.
   for (const tool of tools) {
     const execute = tool.execute
-    tool.execute = async (args, exec) => stripUndefined(await execute(args, exec))
+    tool.execute = async (args, exec) => {
+      try {
+        return stripUndefined(await execute(args, exec))
+      } catch (error) {
+        throw explainFailure(tool.name, args, error, exec, limits.timeoutMs)
+      }
+    }
   }
   return tools
 
@@ -911,8 +997,78 @@ function describeShot(value) {
   } else if (value.uid !== undefined) parts.push(`element uid ${value.uid}`)
   else if (value.fullPage) parts.push('full page')
   else parts.push('viewport')
+  if (value.byteLength !== undefined) {
+    const size = value.byteLength >= 1_000_000 ? `${(value.byteLength / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(value.byteLength / 1000))} kB`
+    parts.push(`${size}${value.format !== undefined ? ` ${value.format}` : ' png'}${value.source === 'file' ? ' (≥ 2 MB: chrome-devtools-mcp wrote it to disk; read back by the plugin — format: "jpeg" or a uid crop gives a smaller capture)' : ''}`)
+  }
+  for (const note of value.notes ?? []) parts.push(`NOTE: ${note}`)
   if (value.fallbackPath !== undefined) parts.push(`saved to ${value.fallbackPath}; not shown inline: ${value.inlineUnavailable}. View it with read_image`)
   return parts.join('; ')
+}
+
+/**
+ * Remedies for failure messages the browser servers (and this plugin) produce, matched against the
+ * message text. Ordered: the first match wins. Sources: chrome-devtools-mcp 1.8.0 McpPage/McpContext/
+ * ToolHandler, Apple's safaridriver --mcp replies, and safari-screenshot.mjs.
+ */
+const FAILURE_HINTS = [
+  [/no longer exists on the page|Element uid .* not found on page|No snapshot found for page/i,
+    'uids come from chrome_snapshot and stop resolving once the page re-renders or navigates; take a fresh chrome_snapshot and use a uid from it.'],
+  [/Providing both "uid" and "fullPage"/i, 'pass either uid (one element) or fullPage (whole page), not both.'],
+  [/A dialog is open/i, 'answer it with chrome_handle_dialog (accept / dismiss); every page tool is blocked until then.'],
+  [/selected page has been closed|No page selected|No page found|Page (?:with id )?\S* ?not found|Target closed|Session closed|Connection closed|Protocol error/i,
+    'the page or browser is gone; open a new window (chrome_open / safari_open, or omit windowId when this chat has none) and navigate again.'],
+  [/did not become interactive within/i, 'the element exists but is not clickable (covered, disabled or off-screen); scroll it into view (chrome_interact scroll with node, or chrome_evaluate_function scrollIntoView), wait, then retry with a fresh uid.'],
+  [/Execution context was destroyed|Cannot find context with specified id/i, 'the page navigated while the script ran; wait for the load (chrome_wait_for / safari_wait_for) and retry.'],
+  [/Access denied: path/i, 'chrome-devtools-mcp only writes under its workspace roots and the temp dir; use chrome_save_screenshot, which writes the file itself.'],
+  [/Could not find option with text/i, 'for <select> elements the value must be an option label exactly as shown; read them with chrome_snapshot (verbose) or evaluate_function.'],
+  [/no element matches/i, 'check the selector against the live DOM: safari_get_page_structure lists heading/landmark selectors, or evaluate document.querySelectorAll(...).length with safari_evaluate_expression.'],
+  [/element is outside the viewport/i, 'pass scrollTo: true (default) or enlarge the window with safari_set_viewport_size, then retake.'],
+  [/does not declare image input/i, 'the current model cannot see images; the screenshot was saved to a file instead — switch to a vision-capable model or inspect it with read_image.'],
+  [/Allow Remote Automation|Remote Automation/i, 'enable Develop ▸ Developer Settings ▸ "Allow Remote Automation" in Safari Technology Preview.'],
+]
+
+/** Append the first matching remedy from FAILURE_HINTS to a message (unchanged when none matches). */
+export function withHint(message) {
+  for (const [pattern, hint] of FAILURE_HINTS) if (pattern.test(message)) return `${message}\nHint: ${hint}`
+  return message
+}
+
+/**
+ * Rewrite an execute() failure into an actionable message: which curated tool failed and — when the
+ * text starts with a `<server tool>: ` prefix from callText — which server tool produced it; MCP-SDK
+ * timeouts explained in terms of the plugin's toolCallTimeoutMs; then a hint. Aborts (the user stopped
+ * the turn) pass through untouched so DSH keeps recognising them.
+ */
+export function explainFailure(toolName, args, error, exec, timeoutMs) {
+  if (error?.name === 'AbortError' || exec?.signal?.aborted === true) return error
+  let message = error instanceof Error ? error.message : String(error)
+  const prefixed = /^([a-z][a-z0-9_]*): /.exec(message)
+  if (prefixed !== null && prefixed[1] !== toolName && !prefixed[1].startsWith('safari_') && !prefixed[1].startsWith('chrome_')) {
+    message = `${toolName}: server tool ${prefixed[1]} failed: ${message.slice(prefixed[0].length)}`
+  } else if (!message.startsWith(toolName)) {
+    message = `${toolName}: ${message}`
+  }
+  if (/-32001|Request timed out|Maximum total timeout exceeded/i.test(message)) {
+    const budget = typeof timeoutMs === 'number' ? `${timeoutMs} ms (browser-automation toolCallTimeoutMs)` : 'the configured toolCallTimeoutMs'
+    const browser = toolName.startsWith('safari_') ? 'safari' : 'chrome'
+    message += `\nThe browser server did not answer within ${budget}. Usual causes: a JavaScript dialog is blocking the page (${browser}_handle_dialog), a navigation that never finishes, an in-page script that never returns, or the browser process is hung — close the window (${browser}_close) and open a fresh one if it persists.`
+  }
+  const argSummary = summarizeArgs(args)
+  if (argSummary !== '') message += `\nRequest: ${argSummary}`
+  const explained = new Error(withHint(message), { cause: error })
+  explained.name = error?.name ?? 'Error'
+  return explained
+}
+
+/** Compact one-line JSON of the call's arguments (long strings elided) so the failure text shows what was asked. */
+function summarizeArgs(args) {
+  if (args === null || typeof args !== 'object') return ''
+  const entries = Object.entries(args).filter(([, value]) => value !== undefined)
+  if (entries.length === 0) return '{} (defaults)'
+  const shown = Object.fromEntries(entries.map(([key, value]) => [key, typeof value === 'string' && value.length > 120 ? `${value.slice(0, 117)}…` : value]))
+  const json = JSON.stringify(shown)
+  return json.length > 400 ? `${json.slice(0, 397)}…` : json
 }
 
 /** Truncate a page read to maxChars, saving the full text to a temp file when cut. */

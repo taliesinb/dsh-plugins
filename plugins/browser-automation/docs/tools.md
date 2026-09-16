@@ -507,7 +507,7 @@ Screenshot of this chat's Safari window written to a PNG file (same element capt
 
 ### `chrome_get_screenshot`
 
-Screenshot of this chat's Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from chrome_snapshot).
+Screenshot of this chat's Chrome page, returned INLINE as an image: the viewport, the whole page (fullPage), or one element (uid from chrome_snapshot; uids expire when the page changes — re-snapshot first). Large captures are handled transparently; format: "jpeg" or a uid crop keeps them small.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
