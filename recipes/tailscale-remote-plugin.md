@@ -31,7 +31,32 @@ stays as reference; this is the one-feature replacement.
 Worktree `~/github/deepseek-harness-tailscale` (created with
 `git worktree add -b fix/tailscale-mounting ../deepseek-harness-tailscale master`
 from `~/github/deepseek-harness`, whose own checkout stays on
-`fix/safari-dock-app-gap` and runs the live GUI). **Why a worktree:** the live
+`fix/safari-dock-app-gap` and runs the live GUI).
+
+**Rebased 2026-09-16 onto upstream** (`upstream` remote =
+`deepseek-ai/deepseek-harness`, added to the fork clone; `master` fast-forwarded
+2196 commits from `76fda72979` to `0d1f50007f` and pushed to `origin`). Branch
+shape now: `master` → `0b0c8a5f8e` (the safari scroll-pin commit, cherry-picked;
+its `boot.ts` import hunk conflicted because upstream moved `STATE_LABELS` to
+`boot-client.ts`) → `1c80583ba3` (this patch; `tsconfig.client.json` conflicted
+because upstream deleted `src/client/fixture.ts`). `fix/safari-dock-app-gap`
+itself was **not** moved: git refuses to force a branch that is checked out in
+another worktree, and rebasing it in place would swap source (and later
+node_modules) under the live server. When the live server is next stopped,
+`git rebase master fix/safari-dock-app-gap` yields exactly `0b0c8a5f8e`'s
+content.
+
+Upstream review before rebasing: no commit in those two weeks touches the
+anchoring points (`<base href="/">`, `resolveBase()`, the WebSocket URL, the
+HMR `EventSource`, `el.src`), no `basePath`/`X-Forwarded-Prefix` support
+exists, and discussion **#4966** (2026-08-30, "all client RPC calls fail
+silently behind a path-prefix reverse proxy") describes exactly this problem:
+the community workaround rewrites `/api` strings inside the bundles and then
+trips `CHANNEL_PATTERN` on `/dsh/api`. The document-relative approach needs
+no bundle rewriting and leaves the channel `/api`. #3210/#3211 (proxy-attested
+identity for privileged RPCs) are orthogonal. `pnpm install --offline` no
+longer suffices after the rebase (new deps); online install + `pnpm run build`
+(~100 s) and the GUI lanes (432 files / 6343 tests) are green. **Why a worktree:** the live
 `dsh web` serves `apps/web/dist` and every `packages/*/lib/client.js` from
 disk, and the HMR watcher hot-swaps rebuilt bundles into the open GUI —
 rebuilding `client-connection` in the live checkout would have swapped the
@@ -137,11 +162,18 @@ Design decisions:
   303 + `Set-Cookie` → forward that cookie on every request with
   `Host`/`Origin` rewritten to `127.0.0.1:<port>`. Refreshed after 6 h or on
   an upstream 401.
-- **Control channel** is a separate RPC channel (`rpc.handle`), not `/api`
-  Fetch routes: Fetch routes are GET/HEAD only and mutations were needed. The
-  handler has no request headers, so "host only" is enforced by the **proxy
-  refusing to forward `/tailscale-remote/*`** (403) — the remote panel shows
-  "controlled from the DSH host only".
+- **Control channel** is its own `webServer` prefix route `/tailscale-remote`
+  gated by `ctx.connection.requestRejection(req)` (DSH's Host/Origin fence +
+  cookie), speaking the Connection envelope so the browser half can use
+  `ctx.connection.rpc.call('/tailscale-remote', …)`. Not `/api` Fetch routes
+  (GET/HEAD only; mutations were needed) and **not `ctx.connection.rpc.handle`**:
+  that worked on the pre-rebase master but on upstream `0d1f50007f` fails at
+  activation with `cannot get property "webServer" without inject` from
+  `rpc-host.ts` `register()` (`owner.webServer` through the traceable service
+  context; no in-tree plugin calls `rpc.handle`, so upstream never notices).
+  "Host only" is enforced by the **proxy refusing to forward
+  `/tailscale-remote/*`** (403) — the remote panel shows "controlled from the
+  DSH host only".
 - **Public passthrough** for `/manifest.webmanifest` and `/favicon.svg`:
   Chrome fetches the manifest without cookies and logged 401s otherwise.
 - `uqr` renders the QR as SVG on the host (same library as the fork).
@@ -204,6 +236,7 @@ DSH_HOME=/tmp/tailscale-remote-home pnpm dsh web --patch /tmp/tailscale-remote-p
 | `/dsh on this node already points at …` | another Serve mapping on `/dsh`; `tailscale serve status`, remove it or change `mountPath` |
 | Enable fails with `could not start the proxy on 127.0.0.1:3083` | port taken (a second `dsh web` with the plugin, e.g. dev overlay + live) — change `listenPort` in one of them |
 | Allowed user still gets 401 | login must match `Tailscale-User-Login` exactly (lower-cased); tagged devices carry no identity headers; check `x-forwarded-for` is in `100.64.0.0/10` |
+| Boot warns `tali-tailscale-remote … cannot get property "webServer" without inject` | an older plugin build using `ctx.connection.rpc.handle`; current code registers on `webServer` directly |
 | Panel says "controlled from the DSH host only" on the laptop | you opened the laptop GUI through the tailnet URL — use `http://127.0.0.1:<port>/` |
 | Settings changes from the phone do not persist | `isLoopback` false remotely (see "Not done" above) |
 | Manifest 401 in console | fixed by the public passthrough; if it reappears the path changed |

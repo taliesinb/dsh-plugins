@@ -87,8 +87,8 @@ the listener but leaves the route (it comes back with the next boot).
 
 ## Control channel
 
-`POST /tailscale-remote/<endpoint>` on DSH's authenticated RPC carrier
-(`ctx.connection.rpc.handle`), JSON envelope `{type:'client-request', rpcId,
+`POST /tailscale-remote/<endpoint>`, a `webServer` prefix route gated by
+`ctx.connection.requestRejection` (DSH's Host/Origin fence + cookie), JSON envelope `{type:'client-request', rpcId,
 method, payload:{args}}`: `status`, `enable`, `disable`,
 `set-users {allowedUsers: "a, b"}`, `rotate-token`.
 

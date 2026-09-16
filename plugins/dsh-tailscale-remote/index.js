@@ -54,6 +54,70 @@ function qrSvg(text) {
   }
 }
 
+const MAX_CONTROL_BODY = 64 * 1024
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = []
+    let size = 0
+    req.on('data', (chunk) => {
+      size += chunk.length
+      if (size > limit) {
+        reject(new Error('body too large'))
+        req.destroy()
+        return
+      }
+      chunks.push(chunk)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+/**
+ * One control request: DSH's trust + auth gate, then the Connection JSON
+ * envelope (`client-request` in, `server-response` out).
+ * @param {import('node:http').IncomingMessage} req
+ * @param {import('node:http').ServerResponse} res
+ * @param {{ requestRejection(req: unknown): number | undefined }} connection
+ * @param {(endpoint: string, payload: unknown) => Promise<unknown>} dispatch
+ */
+export async function controlRoute(req, res, connection, dispatch) {
+  const rejection = connection.requestRejection(req)
+  if (rejection !== undefined) {
+    res.writeHead(rejection, { 'content-type': 'text/plain; charset=utf-8' })
+    res.end(rejection === 401 ? 'unauthorized' : 'forbidden')
+    return
+  }
+  const endpoint = new URL(req.url ?? '/', 'http://x').pathname.slice(CONTROL_CHANNEL.length + 1)
+  if (req.method !== 'POST' || endpoint === '' || endpoint.includes('/')) {
+    res.writeHead(404)
+    res.end('not found')
+    return
+  }
+  let message
+  try {
+    message = JSON.parse(await readBody(req, MAX_CONTROL_BODY))
+  } catch {
+    res.writeHead(400)
+    res.end('body is not JSON')
+    return
+  }
+  if (typeof message !== 'object' || message === null || message.type !== 'client-request' || typeof message.rpcId !== 'string' || message.method !== endpoint) {
+    res.writeHead(400)
+    res.end('invalid client-request envelope')
+    return
+  }
+  let result
+  try {
+    result = await dispatch(endpoint, message.payload)
+  } catch (error) {
+    result = { ok: false, error: { code: 'tailscale-remote/internal', message: String(error?.message ?? error), details: {} } }
+  }
+  res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+  res.end(JSON.stringify({ type: 'server-response', rpcId: message.rpcId, result }))
+}
+
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx
  * @param {ReturnType<typeof Config>} config
@@ -183,7 +247,14 @@ export function apply(ctx, config) {
   })
 
   // ---- control channel (never forwarded by the proxy) --------------------
-  ctx.connection.rpc.handle(CONTROL_CHANNEL, async (endpoint, payload) => {
+  // Registered straight on the web server with DSH's own request gate
+  // (Host/Origin fence + browser-session cookie) rather than through
+  // `ctx.connection.rpc.handle`: that helper resolves `webServer` through the
+  // traceable service context and fails with "cannot get property webServer
+  // without inject" on DSH master as of 2026-09-15 (no in-tree caller uses it).
+  // Wire shape is the Connection envelope, so the browser half keeps using
+  // `ctx.connection.rpc.call(CONTROL_CHANNEL, endpoint, { args })`.
+  const dispatch = async (endpoint, payload) => {
     await boot
     const args = typeof payload === 'object' && payload !== null && typeof payload.args === 'object' && payload.args !== null ? payload.args : {}
     switch (endpoint) {
@@ -194,7 +265,12 @@ export function apply(ctx, config) {
       case 'rotate-token': return rotateToken()
       default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
     }
-  })
+  }
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'prefix',
+    path: CONTROL_CHANNEL,
+    handler: (req, res) => controlRoute(req, res, ctx.connection, dispatch),
+  }), 'tailscale-remote: control channel')
 
   // ---- boot: restore persisted intent -----------------------------------
   const boot = (async () => {
