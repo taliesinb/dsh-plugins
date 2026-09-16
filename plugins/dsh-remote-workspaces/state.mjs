@@ -74,6 +74,8 @@ function normalizeWorkspace(raw, serverIds) {
     ...(typeof raw.remoteTitle === 'string' ? { remoteTitle: raw.remoteTitle } : {}),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date(0).toISOString(),
     order: Number.isFinite(raw.order) ? Number(raw.order) : 0,
+    /** Local manual session order (ids); sessions absent from it keep the remote's order ahead of it. */
+    sessionOrder: Array.isArray(raw.sessionOrder) ? raw.sessionOrder.filter(id => typeof id === 'string') : [],
     cache: {
       sessions,
       ...(typeof cache.polledAt === 'string' ? { polledAt: cache.polledAt } : {}),

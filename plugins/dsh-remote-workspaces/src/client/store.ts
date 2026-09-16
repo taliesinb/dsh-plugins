@@ -212,6 +212,38 @@ export class RemoteWorkspacesModel {
     if (this.view.getSnapshot().selected?.sessionId === sessionId) this.clearSelection()
   }
 
+  /** Refresh every mirrored workspace (the section's refresh-all). */
+  pollAll(): void {
+    for (const workspace of this.runtime.getSnapshot().snapshot?.workspaces ?? []) void this.poll(workspace.id)
+  }
+
+  /** Optimistic local reorder of the groups, then persist. */
+  async reorderWorkspaces(ids: string[]): Promise<void> {
+    this.runtime.update((d) => {
+      if (d.snapshot === undefined) return
+      const byId = new Map(d.snapshot.workspaces.map(workspace => [workspace.id, workspace]))
+      const ordered = ids.flatMap(id => (byId.has(id) ? [byId.get(id)!] : []))
+      const rest = d.snapshot.workspaces.filter(workspace => !ids.includes(workspace.id))
+      d.snapshot.workspaces = [...ordered, ...rest].map((workspace, order) => ({ ...workspace, order }))
+    })
+    const snapshot = await this.api.reorderWorkspaces(ids)
+    this.runtime.update((d) => { d.snapshot = snapshot })
+  }
+
+  /** Optimistic local reorder of one group's sessions, then persist. */
+  async reorderSessions(workspaceId: string, ids: string[]): Promise<void> {
+    this.runtime.update((d) => {
+      const workspace = d.snapshot?.workspaces.find(candidate => candidate.id === workspaceId)
+      if (workspace === undefined) return
+      const byId = new Map(workspace.cache.sessions.map(session => [session.id, session]))
+      workspace.cache.sessions = [
+        ...ids.flatMap(id => (byId.has(id) ? [byId.get(id)!] : [])),
+        ...workspace.cache.sessions.filter(session => !ids.includes(session.id)),
+      ]
+    })
+    this.putWorkspace(await this.api.reorderSessions(workspaceId, ids))
+  }
+
   async renameWorkspace(id: string, title: string): Promise<void> {
     const snapshot = await this.api.renameWorkspace(id, title)
     this.runtime.update((d) => { d.snapshot = snapshot })

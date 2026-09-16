@@ -2,10 +2,11 @@
  * Browser components of dsh-remote-workspaces. English only, inline styles on
  * the shell's alias tokens (house pattern of the other plugins).
  *
- *  - AddRemoteButton   header seat beside "Add workspace": opens the modal.
- *  - RemoteGroups      extra seat below the local tree: one collapsible group
- *                      per mirrored workspace, cached sessions with spinners
- *                      while a poll runs, ↻ / + / … actions, session … menus.
+ *  - RemotesSection    extra seat below the local tree: the "Remotes" section —
+ *                      header (label, refresh-all, add) and one collapsible
+ *                      group per mirrored workspace (cached sessions with
+ *                      spinners while a poll runs, ↻ / … / + actions, session
+ *                      … menus, drag-to-reorder groups and sessions).
  *  - AddRemoteModal    URL (+token) → probe → pick a remote workspace or type
  *                      a directory → name → Done.
  *  - RemoteSessionPanel  keyed `main` entry: an empty host the frame pool
@@ -49,6 +50,13 @@ const S = {
     position: 'absolute', right: 2, bottom: 2, width: 12, height: 12, borderRadius: 6, display: 'grid', placeItems: 'center',
     background: 'var(--dsw-specific-sidebar-fill, var(--dsw-alias-bg-base))', color: 'var(--dsw-alias-state-business-primary)',
   } as CSSProperties,
+  // Mirrors WorkspaceBrowser.module.css .sectionHeader (36px, tertiary label) —
+  // the "Workspaces" header this section sits under.
+  sectionHeader: {
+    flex: 'none', display: 'flex', alignItems: 'center', gap: 4, height: 36, paddingLeft: 4, marginBottom: 4,
+    boxSizing: 'border-box', color: 'var(--dsw-alias-label-tertiary)', fontSize: 13,
+  } as CSSProperties,
+  sectionLabel: { flex: 'none', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap', lineHeight: '20px' } as CSSProperties,
   group: {} as CSSProperties,
   // Mirrors ui-workspace Rows.module.css: .projectRow (34px, pad 0 8, gap 6),
   // a 16x20 leading slot (folder, chevron on hover), hover-revealed actions
@@ -141,15 +149,38 @@ function RemoteFolderIcon({ open, active }: { open: boolean; active?: boolean })
 }
 
 // ---------------------------------------------------------------------------
-// header seat
+// drag-to-reorder (HTML5 DnD; groups among themselves, sessions within a group)
 
-export function AddRemoteButton({ wide, model }: PropsRuntime<'sidebar.workspaces.headerAction'> & Face) {
-  return (
-    <IconButton label="Add remote workspace" onClick={() => { model.setAddOpen(true) }}>
-      <IconProjectAddOutline16 size={wide ? 16 : 18} />
-      <span style={S.badge}><IconGlobeOutline14 size={9} /></span>
-    </IconButton>
-  )
+type DragItem = { kind: 'group'; id: string } | { kind: 'session'; id: string; workspaceId: string }
+type DropHalf = 'before' | 'after'
+interface DragState {
+  item: DragItem | null
+  over: { key: string; half: DropHalf } | null
+  start: (item: DragItem) => void
+  hover: (key: string, half: DropHalf) => void
+  leave: (key: string) => void
+  end: () => void
+}
+const NO_SELECT: CSSProperties = { userSelect: 'none', WebkitUserSelect: 'none' }
+
+function dropStyle(state: DragState, key: string): CSSProperties {
+  if (state.over?.key !== key) return {}
+  return { boxShadow: state.over.half === 'before' ? 'inset 0 2px 0 var(--dsw-alias-state-business-primary)' : 'inset 0 -2px 0 var(--dsw-alias-state-business-primary)' }
+}
+
+/** Reorder `ids` so `moved` lands before/after `target`. */
+function reorder(ids: readonly string[], moved: string, target: string, half: DropHalf): string[] {
+  if (moved === target) return [...ids]
+  const rest = ids.filter(id => id !== moved)
+  const at = rest.indexOf(target)
+  if (at === -1) return [...ids]
+  rest.splice(half === 'before' ? at : at + 1, 0, moved)
+  return rest
+}
+
+function halfOf(event: React.DragEvent<HTMLElement>): DropHalf {
+  const rect = event.currentTarget.getBoundingClientRect()
+  return event.clientY < rect.top + rect.height / 2 ? 'before' : 'after'
 }
 
 // ---------------------------------------------------------------------------
@@ -159,12 +190,17 @@ function shortId(id: string): string {
   return id.replace(/^session-/, '').slice(0, 8)
 }
 
-function SessionRow({ workspace, session, selected, busy, openRemoteSession, model }: {
+function SessionRow({ workspace, session, selected, busy, openRemoteSession, model, drag, order }: {
   workspace: RemoteWorkspace
   session: RemoteWorkspace['cache']['sessions'][number] & { placeholder?: boolean }
   selected: boolean
   busy: boolean
+  drag: DragState
+  /** Current ids of this group's rows, for computing the dropped order. */
+  order: readonly string[]
 } & Pick<Face, 'openRemoteSession' | 'model'>) {
+  const dragKey = `session:${session.id}`
+  const compatible = drag.item?.kind === 'session' && drag.item.workspaceId === workspace.id && drag.item.id !== session.id
   const [hover, setHover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [rename, setRename] = useState<string | null>(null)
@@ -197,10 +233,25 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
       <div
         role="treeitem"
         aria-selected={selected}
-        style={{ ...S.sessionRow, background: selected || hover ? HOVER : 'transparent', opacity: pending ? 0.6 : 1 }}
+        draggable={session.placeholder !== true}
+        style={{ ...S.sessionRow, ...NO_SELECT, ...dropStyle(drag, dragKey), background: selected || hover ? HOVER : 'transparent', opacity: pending || drag.item?.id === session.id ? 0.6 : 1 }}
         onMouseEnter={() => { setHover(true) }}
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { openRemoteSession({ workspaceId: workspace.id, sessionId: session.id }) }}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', dragKey)
+          drag.start({ kind: 'session', id: session.id, workspaceId: workspace.id })
+        }}
+        onDragEnd={drag.end}
+        onDragOver={(event) => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; drag.hover(dragKey, halfOf(event)) } }}
+        onDragLeave={() => { drag.leave(dragKey) }}
+        onDrop={(event) => {
+          if (!compatible || drag.item === null) return
+          event.preventDefault()
+          void model.reorderSessions(workspace.id, reorder(order, drag.item.id, session.id, halfOf(event)))
+          drag.end()
+        }}
       >
         <span style={S.slot}>{busy ? <Spinner /> : null}</span>
         <span style={S.sessionTitle} title={session.title || session.id}>
@@ -249,7 +300,9 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
   )
 }
 
-function Group({ workspace, model, openRemoteSession, useView, useRuntime }: { workspace: RemoteWorkspace } & Face) {
+function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag, groupOrder }: { workspace: RemoteWorkspace; drag: DragState; groupOrder: readonly string[] } & Face) {
+  const dragKey = `group:${workspace.id}`
+  const compatible = drag.item?.kind === 'group' && drag.item.id !== workspace.id
   const expanded = useView(state => state.expanded[workspace.id] === true)
   const selected = useView(state => state.selected)
   const polling = useRuntime(state => state.polling.includes(workspace.id))
@@ -293,11 +346,26 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime }: { w
       <div
         role="treeitem"
         aria-expanded={expanded}
-        style={{ ...S.groupRow, background: hover || menuOpen ? HOVER : 'transparent' }}
+        draggable
+        style={{ ...S.groupRow, ...NO_SELECT, ...dropStyle(drag, dragKey), background: hover || menuOpen ? HOVER : 'transparent', opacity: drag.item?.kind === 'group' && drag.item.id === workspace.id ? 0.6 : 1 }}
         title={`${serverLabel} · ${workspace.remotePath}`}
         onMouseEnter={() => { setHover(true) }}
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { model.setExpanded(workspace.id, !expanded) }}
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', dragKey)
+          drag.start({ kind: 'group', id: workspace.id })
+        }}
+        onDragEnd={drag.end}
+        onDragOver={(event) => { if (compatible) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; drag.hover(dragKey, halfOf(event)) } }}
+        onDragLeave={() => { drag.leave(dragKey) }}
+        onDrop={(event) => {
+          if (!compatible || drag.item === null) return
+          event.preventDefault()
+          void model.reorderWorkspaces(reorder(groupOrder, drag.item.id, workspace.id, halfOf(event)))
+          drag.end()
+        }}
       >
         {/* Leading slot: the badged folder, swapped for the expand chevron on hover (local-tree pattern). */}
         <span style={{ ...S.slot, color: 'var(--dsw-alias-label-caption)' }}>
@@ -349,6 +417,8 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime }: { w
               selected={selected?.workspaceId === workspace.id && selected.sessionId === session.id}
               openRemoteSession={openRemoteSession}
               model={model}
+              drag={drag}
+              order={sessions.map(candidate => candidate.id)}
             />
           ))}
           {error !== undefined && <div style={S.error}>{error}</div>}
@@ -393,18 +463,57 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime }: { w
   )
 }
 
-export function RemoteGroups(props: PropsRuntime<'sidebar.workspaces.extra'> & Face) {
+/**
+ * The "Remotes" section: anchored at the bottom of the list area (the local
+ * tree above it flexes), growing upward to at most half the area, with its own
+ * scroll. Header: label, refresh-all, add — nothing else.
+ */
+export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> & Face) {
   const { useRuntime, model } = props
   const workspaces = useRuntime(state => state.snapshot?.workspaces)
   const loaded = useRuntime(state => state.loaded)
   const loadError = useRuntime(state => state.loadError)
+  const anyPolling = useRuntime(state => state.polling.length > 0)
   useEffect(() => { if (!loaded) void model.refresh() }, [loaded, model])
-  if (loadError !== undefined) return <div style={S.error}>Remote workspaces: {loadError}</div>
-  if (workspaces === undefined || workspaces.length === 0) return null
+
+  const [item, setItem] = useState<DragItem | null>(null)
+  const [over, setOver] = useState<{ key: string; half: DropHalf } | null>(null)
+  const drag = useMemo<DragState>(() => ({
+    item, over,
+    start: next => { setItem(next); setOver(null) },
+    hover: (key, half) => { setOver(current => (current?.key === key && current.half === half ? current : { key, half })) },
+    leave: key => { setOver(current => (current?.key === key ? null : current)) },
+    end: () => { setItem(null); setOver(null) },
+  }), [item, over])
+
+  const groupOrder = (workspaces ?? []).map(workspace => workspace.id)
   return (
-    // Right inset matches the local list's reserved scrollbar gutter so rows share one right edge.
-    <div data-remote-workspaces style={{ paddingRight: 'calc(var(--dsh-session-list-scrollbar-width, 8px) + var(--dsh-session-list-scrollbar-offset, 2px) + 2px)' }}>
-      {workspaces.map(workspace => <Group key={workspace.id} workspace={workspace} {...props} />)}
+    <div
+      data-remote-workspaces
+      style={{
+        flex: 'none', display: 'flex', flexDirection: 'column', minHeight: 0, maxHeight: '50%', marginTop: 4,
+        // Right inset matches the local list's reserved scrollbar gutter so rows share one right edge.
+        paddingRight: 'calc(var(--dsh-session-list-scrollbar-width, 8px) + var(--dsh-session-list-scrollbar-offset, 2px) + 2px)',
+      }}
+    >
+      <div style={{ ...S.sectionHeader, ...NO_SELECT }}>
+        <span style={S.sectionLabel}>Remotes</span>
+        <span style={{ flex: '1 1 auto' }} />
+        <IconButton label="Refresh all remotes" disabled={anyPolling || (workspaces?.length ?? 0) === 0} onClick={() => { model.pollAll() }}>
+          {anyPolling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
+        </IconButton>
+        <IconButton label="Add remote workspace" onClick={() => { model.setAddOpen(true) }}>
+          <IconProjectAddOutline16 size={16} />
+          <span style={S.badge}><IconGlobeOutline14 size={9} /></span>
+        </IconButton>
+      </div>
+      <div style={{ minHeight: 0, overflowY: 'auto', paddingBottom: 8 }} onDragOver={(event) => { if (item !== null) event.preventDefault() }}>
+        {loadError !== undefined && <div style={{ ...S.error, padding: '2px 8px' }}>Remote workspaces: {loadError}</div>}
+        {loaded && loadError === undefined && (workspaces?.length ?? 0) === 0 && (
+          <div style={{ ...S.hint, padding: '2px 8px' }}>No remote workspaces yet.</div>
+        )}
+        {(workspaces ?? []).map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} {...props} />)}
+      </div>
     </div>
   )
 }

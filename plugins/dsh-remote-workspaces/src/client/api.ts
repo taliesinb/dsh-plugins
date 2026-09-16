@@ -42,6 +42,7 @@ export interface RemoteWorkspace {
   remoteTitle?: string
   createdAt: string
   order: number
+  sessionOrder?: string[]
   cache: { sessions: CachedSession[]; polledAt?: string; gone?: boolean }
   server?: { id: string; label: string; localBase: string }
 }
@@ -76,6 +77,8 @@ export interface RemoteApi {
   pollWorkspace(id: string): Promise<RemoteWorkspace>
   removeWorkspace(id: string): Promise<StatusSnapshot>
   renameWorkspace(id: string, title: string): Promise<StatusSnapshot>
+  reorderWorkspaces(ids: string[]): Promise<StatusSnapshot>
+  reorderSessions(workspaceId: string, ids: string[]): Promise<RemoteWorkspace>
   renameSession(workspaceId: string, sessionId: string, title: string): Promise<RemoteWorkspace>
   archiveSession(workspaceId: string, sessionId: string): Promise<RemoteWorkspace>
   startSession(workspaceId: string): Promise<{ sessionId: string; created: boolean }>
@@ -97,6 +100,8 @@ export function createApi(rpc: ClientConnectionRpc): RemoteApi {
     pollWorkspace: id => call<{ workspace: RemoteWorkspace }>('workspaces.poll', { id }).then(workspaceOf),
     removeWorkspace: id => call<StatusSnapshot>('workspaces.remove', { id }),
     renameWorkspace: (id, title) => call<StatusSnapshot>('workspaces.rename', { id, title }),
+    reorderWorkspaces: ids => call<StatusSnapshot>('workspaces.reorder', { ids }),
+    reorderSessions: (workspaceId, ids) => call<{ workspace: RemoteWorkspace }>('sessions.reorder', { workspaceId, ids }).then(workspaceOf),
     renameSession: (workspaceId, sessionId, title) => call<{ workspace: RemoteWorkspace }>('sessions.rename', { workspaceId, sessionId, title }).then(workspaceOf),
     archiveSession: (workspaceId, sessionId) => call<{ workspace: RemoteWorkspace }>('sessions.archive', { workspaceId, sessionId }).then(workspaceOf),
     startSession: workspaceId => call<{ sessionId: string; created: boolean }>('sessions.start', { workspaceId }),

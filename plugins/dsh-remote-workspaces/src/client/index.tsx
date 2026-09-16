@@ -1,7 +1,6 @@
 /**
  * Browser half of dsh-remote-workspaces. Registers:
- *   - `sidebar.workspaces.headerAction`  the add-remote button (fork seat)
- *   - `sidebar.workspaces.extra`         the remote workspace groups (fork seat)
+ *   - `sidebar.workspaces.extra`         the "Remotes" section (fork seat)
  *   - `main` key `remote-session`        the host box the visible frame covers
  *   - `shell.overlay`                    the iframe pool + the add-remote modal
  *
@@ -18,7 +17,7 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createApi } from './api.ts'
 import { PANEL_ID, RemoteWorkspacesModel, type RemoteSelection } from './store.ts'
-import { AddRemoteButton, AddRemoteModal, FramePool, RemoteGroups, RemoteSessionPanel, type RemoteInjected } from './ui.tsx'
+import { AddRemoteModal, FramePool, RemoteSessionPanel, RemotesSection, type RemoteInjected } from './ui.tsx'
 
 export const inject = ['slots', 'connection', 'layout']
 
@@ -43,13 +42,11 @@ export function apply(ctx: Context): void {
     hooks: { view: model.view, runtime: model.runtime },
   })
 
-  ctx.effect(() => ctx.slots.inject('sidebar.workspaces.headerAction', () => ctx.slots.register({
-    name: 'sidebar.workspaces.headerAction', id: 'remote-workspaces.add', order: 10, inject: injected,
-  }, AddRemoteButton)), 'remote-workspaces: add button')
-
+  // The "Remotes" section (its own header carries add + refresh-all; nothing
+  // is added to the Workspaces header).
   ctx.effect(() => ctx.slots.inject('sidebar.workspaces.extra', () => ctx.slots.register({
-    name: 'sidebar.workspaces.extra', id: 'remote-workspaces.groups', order: 10, inject: injected,
-  }, RemoteGroups)), 'remote-workspaces: groups')
+    name: 'sidebar.workspaces.extra', id: 'remote-workspaces.section', order: 10, inject: injected,
+  }, RemotesSection)), 'remote-workspaces: section')
 
   ctx.effect(() => ctx.slots.inject('main', () => ctx.slots.register({
     name: 'main', key: PANEL_ID, inject: injected,

@@ -17,9 +17,11 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
   auth bridge (tailnet identity, or standing token → cookie, re-exchanged on 401),
   `Location` rewriting back under the mount, control channel `/remote-workspaces`.
 - **Phase 3 (done):** persisted registry (`servers.probe`, `workspaces.add|poll|remove|
-  rename`, `sessions.rename|archive|start`) and the browser half: badged add button
-  (fork seat `sidebar.workspaces.headerAction`), remote groups below the local tree
-  (`sidebar.workspaces.extra`) with cached rows + spinners, ↻ / + / … actions,
+  rename|reorder`, `sessions.rename|archive|start|reorder`) and the browser half: a
+  bottom-anchored **Remotes** section (fork seat `sidebar.workspaces.extra`; header =
+  label + refresh-all + badged add, nothing else) with one group per mirrored
+  workspace — cached rows + spinners, ↻ / … / + actions, drag-to-reorder groups and
+  sessions within a group (local order layered over the remote's),
   add-remote modal (URL → probe → pick or new directory → name), keyed `main` panel
   host + `shell.overlay` iframe pool (10 min hidden TTL, cap 4), reload restore.
   Verified end to end with two local DSH instances; see

@@ -355,6 +355,19 @@ export function apply(ctx, config) {
     return server
   }
 
+  /**
+   * Local manual order over the remote's order, like the local tree's
+   * per-workspace order: ids the operator arranged keep their relative order;
+   * sessions not yet arranged (new ones) stay in front, in the remote's order.
+   */
+  const applySessionOrder = (ids, order) => {
+    if (!Array.isArray(order) || order.length === 0) return ids
+    const present = new Set(ids)
+    const arranged = order.filter(id => present.has(id))
+    const arrangedSet = new Set(arranged)
+    return [...ids.filter(id => !arrangedSet.has(id)), ...arranged]
+  }
+
   /** Refresh one mirrored workspace from the remote: existence, path/title, visible sessions. */
   const pollWorkspace = async (workspace) => {
     const egress = egressOf(workspace.serverId)
@@ -368,9 +381,8 @@ export function apply(ctx, config) {
     const archived = new Set(baseline.archivedSessionIds ?? [])
     const listed = must(await egress.call('session', 'list', { _request: {} }), 'session.list')
     const byId = new Map((listed.items ?? []).map(item => [item.sessionId, item]))
-    const sessions = view.sessionIds
-      .filter(id => byId.has(id) && !archived.has(id) && byId.get(id).blank !== true)
-      .map(id => sessionRow(byId.get(id)))
+    const visible = view.sessionIds.filter(id => byId.has(id) && !archived.has(id) && byId.get(id).blank !== true)
+    const sessions = applySessionOrder(visible, workspace.sessionOrder).map(id => sessionRow(byId.get(id)))
     workspace.remotePath = view.path
     workspace.remoteTitle = view.title
     workspace.cache = { sessions, polledAt: new Date().toISOString() }
@@ -439,6 +451,28 @@ export function apply(ctx, config) {
     return ok(snapshot())
   })
 
+  /** Persist a new order of the mirrored workspaces (ids in display order). */
+  const reorderWorkspaces = ids => exclusive(async () => {
+    const wanted = Array.isArray(ids) ? ids.map(String) : []
+    const known = new Map(state.workspaces.map(workspace => [workspace.id, workspace]))
+    let order = 0
+    for (const id of wanted) if (known.has(id)) known.get(id).order = order++
+    for (const workspace of [...state.workspaces].sort((a, b) => a.order - b.order)) if (!wanted.includes(workspace.id)) workspace.order = order++
+    await persist()
+    return ok(snapshot())
+  })
+
+  /** Persist the operator's session order within one mirrored workspace and re-project its cache. */
+  const reorderSessions = (workspaceId, ids) => exclusive(async () => {
+    const workspace = workspaceOf(workspaceId)
+    workspace.sessionOrder = Array.isArray(ids) ? ids.map(String) : []
+    const cachedIds = workspace.cache.sessions.map(session => session.id)
+    const byId = new Map(workspace.cache.sessions.map(session => [session.id, session]))
+    workspace.cache = { ...workspace.cache, sessions: applySessionOrder(cachedIds, workspace.sessionOrder).map(id => byId.get(id)) }
+    await persist()
+    return ok({ workspace: snapshot().workspaces.find(candidate => candidate.id === workspace.id) })
+  })
+
   const renameSession = (workspaceId, sessionId, title) => exclusive(async () => {
     const workspace = workspaceOf(workspaceId)
     const egress = egressOf(workspace.serverId)
@@ -489,6 +523,8 @@ export function apply(ctx, config) {
         case 'workspaces.poll': return exclusive(() => pollWorkspace(workspaceOf(args.id)))
         case 'workspaces.remove': return removeWorkspace(args.id)
         case 'workspaces.rename': return renameWorkspace(args.id, args.title)
+        case 'workspaces.reorder': return reorderWorkspaces(args.ids)
+        case 'sessions.reorder': return reorderSessions(args.workspaceId, args.ids)
         case 'sessions.rename': return renameSession(args.workspaceId, args.sessionId, args.title)
         case 'sessions.archive': return archiveSession(args.workspaceId, args.sessionId)
         case 'sessions.start': return startSession(args.workspaceId)
