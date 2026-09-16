@@ -12,6 +12,11 @@ foo-bar-baz: rename the widget and add tests
 stops matching, the row goes back to "New Session". The prompt is sent to the
 model **unchanged** (the slug is a useful hint about the task).
 
+**Ghost rows.** Select another session and the typed-into New Session does
+not vanish: a dimmed row (the slug, or "New Session") stays under its
+workspace header; click it to return to the draft. A New Session with an
+empty draft leaves no ghost.
+
 ## Slug grammar
 
 `^\s*([a-z0-9][a-z0-9_-]*):(?=\s|$)` — lowercase ASCII letters, digits, `-`,
@@ -58,6 +63,20 @@ Browser-only client plugin (`index.js` host half just logs).
    `rename` records a `user`-source `session/title` event, which supersedes
    the in-flight automatic (LLM) title and stops later automatic retitling.
 
+4. **Ghost rows** (`ghosts.ts`). The browser lists a blank session only
+   while it is current (`tree.ts`), but the session survives on the host (New
+   Session reuses it) and its draft is persisted per session by
+   ui-conversation's store (`localStorage['dsh.conversation.<id>'].draft`).
+   The plugin subscribes to `sessions.list` + `workspaces.list`; for every
+   blank, non-current session with a non-empty persisted draft it inserts a
+   `cloneNode` of a real session row (selection/drag/menu artefacts
+   stripped, `opacity: .5`, `data-tdsn-ghost`) right after the workspace
+   header's HoverCard wrapper, labelled with the draft's slug or the sidebar's
+   own localized "New Session" text. Click/Enter → `sessions.open(id)`; the
+   real blank row then renders and the ghost is reconciled away. Headers are
+   matched by title text (rows carry no ids); only the grouped list is
+   handled. Survives reloads, since both the session and the draft persist.
+
 ## Dev
 
 ```sh
@@ -86,3 +105,7 @@ Isolated preview home, workspace `/tmp/tdsn-scratch`:
   retitle followed.
 - sending `Note: reply with…` in a fresh New Session → no user title; the
   built-in `fallback` and the LLM `provider` titles arrived as usual.
+- ghosts: `ghost-check: …` draft + select another session → dimmed
+  `ghost-check` row under the header; clicking it restores the draft and the
+  real row; clearing the draft and leaving → no ghost; a plain draft → dimmed
+  `New Session` ghost.

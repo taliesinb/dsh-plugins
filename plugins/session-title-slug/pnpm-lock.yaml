@@ -14,6 +14,9 @@ importers:
       '@deepseek-ai/dsh-api-session-controller':
         specifier: link:/Users/tali/github/deepseek-harness/packages/api/session-controller
         version: link:../../../deepseek-harness/packages/api/session-controller
+      '@deepseek-ai/dsh-api-workspace-controller':
+        specifier: link:/Users/tali/github/deepseek-harness/packages/api/workspace-controller
+        version: link:../../../deepseek-harness/packages/api/workspace-controller
       '@deepseek-ai/dsh-client-ui-conversation':
         specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-conversation
         version: link:../../../deepseek-harness/packages/client/ui-conversation

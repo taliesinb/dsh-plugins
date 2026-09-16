@@ -31,9 +31,15 @@
  * in-flight automatic (LLM) title and stops later automatic retitling.
  *
  * The preview is a DOM patch of the sidebar row; see preview.ts for why.
+ *
+ * GHOST ROWS — a blank session you typed into stays reachable after you
+ * select another session: ghosts.ts inserts a dimmed row (slug or "New
+ * Session") under its Workspace header for every blank, non-current session
+ * whose persisted draft is non-empty; clicking it opens the session.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
 // Type-only imports (erased): declaration-merge the slot map, the session
 // standard props (useSession) and the composer standard props (useInput).
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -43,6 +49,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef } from 'react'
 import { parseSlug } from './slug.ts'
 import { installPreview } from './preview.ts'
+import { installGhosts } from './ghosts.ts'
 
 export { parseSlug } from './slug.ts'
 
@@ -99,7 +106,7 @@ function SlugWatcher({ sessionId, useInput, useSession, renameSession, setPrevie
 }
 
 export const name = 'session-title-slug-client'
-export const inject = ['slots', 'sessions']
+export const inject = ['slots', 'sessions', 'workspaces']
 
 /**
  * Client plugin body: install the sidebar preview patcher and contribute the
@@ -108,8 +115,30 @@ export const inject = ['slots', 'sessions']
  */
 export function apply(ctx: Context): void {
   const sessions = ctx.get('sessions') as ISessions
+  const workspaces = ctx.get('workspaces') as IWorkspaces
   const preview = installPreview()
   ctx.effect(() => () => { preview.dispose() }, 'session-title-slug: sidebar preview')
+
+  // Ghost rows follow the Sessions list (rows + current) and the Workspaces.
+  const ghosts = installGhosts((sessionId) => { sessions.open(sessionId as SessionId) })
+  const feedGhosts = (): void => {
+    const list = sessions.list.getSnapshot()
+    ghosts.update({
+      sessions: list.ids.map(id => list.byId[id]).filter(s => s !== undefined),
+      current: list.current,
+      workspaces: workspaces.list.getSnapshot().items,
+    })
+  }
+  ctx.effect(() => {
+    const unsubscribeSessions = sessions.list.subscribe(feedGhosts)
+    const unsubscribeWorkspaces = workspaces.list.subscribe(feedGhosts)
+    feedGhosts()
+    return () => {
+      unsubscribeSessions()
+      unsubscribeWorkspaces()
+      ghosts.dispose()
+    }
+  }, 'session-title-slug: ghost rows')
 
   // One preview at a time: the last blank session to report wins, and only
   // its own clear resets it (a stale clear from an unmounting sibling must

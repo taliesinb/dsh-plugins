@@ -35,6 +35,7 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "link:/Users/tali/github/deepseek-harness/vendor/cordis",
     "@deepseek-ai/dsh-api-session-controller": "link:/Users/tali/github/deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-api-workspace-controller": "link:/Users/tali/github/deepseek-harness/packages/api/workspace-controller",
     "@deepseek-ai/dsh-client-ui-conversation": "link:/Users/tali/github/deepseek-harness/packages/client/ui-conversation",
     "@deepseek-ai/dsh-client-ui-renderer": "link:/Users/tali/github/deepseek-harness/packages/client/ui-renderer",
     "@deepseek-ai/dsh-client-ui-session": "link:/Users/tali/github/deepseek-harness/packages/client/ui-session",

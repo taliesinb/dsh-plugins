@@ -45,6 +45,24 @@ Consequences:
   submission echo's exact text; fire when `blank` flips false. A rejected
   prompt leaves no title behind.
 
+## Follow-up (same day): ghost rows for typed-into New Sessions
+
+Tali: selecting another session made the phantom New Session disappear;
+wanted it to stay, dimmed (slug or "New Session"), unless nothing was typed.
+Facts that made this plugin-only:
+
+| Fact | Where |
+|---|---|
+| The blank session persists on the host and is reused by New Session; only the *listing* filters non-current blanks. | `ui-workspace/src/client/tree.ts` |
+| The composer draft is persisted per session: `defineStore({ persist: 'dsh.conversation' })` → `localStorage['dsh.conversation.<sessionId>']` = `JSON.stringify({draft, view, viewRequest})` (plain, no zustand envelope). | `ui-conversation/src/client/stores.ts`, `packages/client/store/src/index.ts` `attachPersistence` |
+| `ISessions.list` (`{ids, byId, current}`) and `IWorkspaces.list` (`items[]: {workspaceId, title, path, sessionIds}`) are observable services a client plugin can `ctx.get`. | `session-controller/src/client/sessions/service.ts`, `workspace-controller/src/types.ts` |
+| `ISessions.open(id)` selects any listed session, blank included. | `session-controller/src/client/contract/sessions.ts` |
+| Each row (header and session) is wrapped in HoverCard's block `div[class$="_root"]`; the insertion anchor is that wrapper, not the `treeitem`. | `ui-primitives/src/HoverCard.tsx` |
+
+Implementation: `plugins/session-title-slug/src/client/ghosts.ts` (see the
+README's "Ghost rows"). Verified on the preview: ghost appears/returns/
+clears; plain draft ghosts as "New Session".
+
 ## Rejected alternatives
 
 - Overriding `workspace.session.new` in the locale service — throws.
