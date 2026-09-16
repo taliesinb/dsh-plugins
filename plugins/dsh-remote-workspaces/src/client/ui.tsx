@@ -416,7 +416,7 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
     try {
       const result = await api.probeServer(url.trim(), token.trim() === '' ? undefined : token.trim())
       setProbe(result)
-      setPick(result.workspaces[0]?.workspaceId ?? 'new')
+      setPick(result.workspaces.find(workspace => !workspace.mirrored)?.workspaceId ?? 'new')
       setStep('workspace')
     } catch (failure) {
       const message = failure instanceof Error ? failure.message : String(failure)
@@ -445,7 +445,8 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
   }, [probe, token, pick, path, name, model, openRemoteSession])
 
   const canProbe = url.trim() !== '' && !probing
-  const canDone = probe !== null && !adding && name.trim() !== '' && (pick !== 'new' || path.trim().startsWith('/'))
+  const pickMirrored = probe?.workspaces.find(workspace => workspace.workspaceId === pick)?.mirrored === true
+  const canDone = probe !== null && !adding && !pickMirrored && name.trim() !== '' && (pick !== 'new' || path.trim().startsWith('/'))
 
   return (
     <Modal
@@ -498,13 +499,24 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
             <span style={S.label}>Workspace on the remote</span>
             <div style={S.list} role="radiogroup">
               {probe.workspaces.map(workspace => (
-                <div key={workspace.workspaceId} role="radio" aria-checked={pick === workspace.workspaceId}
-                  style={{ ...S.option, background: pick === workspace.workspaceId ? HOVER : 'transparent' }}
-                  onClick={() => { setPick(workspace.workspaceId) }}>
+                <div key={workspace.workspaceId} role="radio" aria-checked={pick === workspace.workspaceId} aria-disabled={workspace.mirrored || undefined}
+                  title={workspace.mirrored ? 'Already in this sidebar' : workspace.path}
+                  style={{
+                    ...S.option,
+                    background: pick === workspace.workspaceId ? HOVER : 'transparent',
+                    ...(workspace.mirrored ? { opacity: 0.45, cursor: 'default' } : {}),
+                  }}
+                  onClick={() => { if (!workspace.mirrored) setPick(workspace.workspaceId) }}>
                   <RemoteFolderIcon open={false} />
                   <span style={{ flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workspace.title}</span>
-                  <span style={{ ...S.muted, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '45%' }} title={workspace.path}>{workspace.path}</span>
-                  <span style={{ ...S.muted, fontSize: 11 }}>{workspace.sessionCount}</span>
+                  {workspace.mirrored
+                    ? <span style={{ ...S.muted, fontSize: 11 }}>added</span>
+                    : (
+                      <>
+                        <span style={{ ...S.muted, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '45%' }} title={workspace.path}>{workspace.path}</span>
+                        <span style={{ ...S.muted, fontSize: 11 }}>{workspace.sessionCount}</span>
+                      </>
+                    )}
                 </div>
               ))}
               <div role="radio" aria-checked={pick === 'new'} style={{ ...S.option, background: pick === 'new' ? HOVER : 'transparent' }} onClick={() => { setPick('new') }}>

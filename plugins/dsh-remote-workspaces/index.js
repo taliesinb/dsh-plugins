@@ -313,6 +313,8 @@ export function apply(ctx, config) {
       return listed
     }
     const items = Array.isArray(listed.value?.items) ? listed.value.items : []
+    // Already mirrored here: the modal grays these out instead of adding twice.
+    const mirrored = new Set(known === undefined ? [] : state.workspaces.filter(workspace => workspace.serverId === known.id).map(workspace => workspace.remoteWorkspaceId))
     return ok({
       url: remote.url,
       hostname: remote.hostname,
@@ -320,7 +322,9 @@ export function apply(ctx, config) {
       label: known?.label ?? remote.hostname.split('.')[0],
       elapsedMs: Date.now() - started,
       mode: egress.status().mode,
-      workspaces: items.map(view => ({ workspaceId: view.workspaceId, path: view.path, title: view.title, sessionCount: view.sessionIds.length })),
+      workspaces: items.map(view => ({
+        workspaceId: view.workspaceId, path: view.path, title: view.title, sessionCount: view.sessionIds.length, mirrored: mirrored.has(view.workspaceId),
+      })),
     })
   }
 
@@ -397,22 +401,23 @@ export function apply(ctx, config) {
     } catch (error) {
       return fail('remote', String(error?.message ?? error))
     }
-    let workspace = state.workspaces.find(candidate => candidate.serverId === server.id && candidate.remoteWorkspaceId === view.workspaceId)
-    if (workspace === undefined) {
-      workspace = {
-        id: generateId('rws'),
-        serverId: server.id,
-        remoteWorkspaceId: view.workspaceId,
-        title: String(args.title ?? '').trim() || `${server.label}-${view.title}`,
-        remotePath: view.path,
-        createdAt: new Date().toISOString(),
-        order: state.workspaces.reduce((max, candidate) => Math.max(max, candidate.order), -1) + 1,
-        cache: { sessions: [] },
-      }
-      state.workspaces.push(workspace)
-    } else if (String(args.title ?? '').trim() !== '') {
-      workspace.title = String(args.title).trim()
+    const existing = state.workspaces.find(candidate => candidate.serverId === server.id && candidate.remoteWorkspaceId === view.workspaceId)
+    if (existing !== undefined) {
+      // Both picker paths land here: a grayed-out pick bypassed, or a typed
+      // directory the remote resolved to a workspace this sidebar already has.
+      return fail('already-added', `"${existing.title}" already mirrors ${view.title} (${view.path}) from ${server.label}`, { workspaceId: existing.id })
     }
+    const workspace = {
+      id: generateId('rws'),
+      serverId: server.id,
+      remoteWorkspaceId: view.workspaceId,
+      title: String(args.title ?? '').trim() || `${server.label}-${view.title}`,
+      remotePath: view.path,
+      createdAt: new Date().toISOString(),
+      order: state.workspaces.reduce((max, candidate) => Math.max(max, candidate.order), -1) + 1,
+      cache: { sessions: [] },
+    }
+    state.workspaces.push(workspace)
     await persist()
     return pollWorkspace(workspace)
   })

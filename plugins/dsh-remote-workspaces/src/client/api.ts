@@ -60,7 +60,7 @@ export interface ProbeResult {
   label: string
   elapsedMs: number
   mode: 'identity' | 'token'
-  workspaces: { workspaceId: string; path: string; title: string; sessionCount: number }[]
+  workspaces: { workspaceId: string; path: string; title: string; sessionCount: number; mirrored: boolean }[]
 }
 
 export class RemoteApiError extends Error {
