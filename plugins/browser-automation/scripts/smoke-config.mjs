@@ -11,7 +11,44 @@ const fail = (message) => { throw new Error(message) }
 const filled = plugin.Config({})
 if (!filled.safari.enabled || !filled.chrome.enabled || filled.subagents !== true || filled.idleMinutes !== 30 || filled.safari.reader.maxIdle !== 1) fail(`defaults: ${JSON.stringify(filled)}`)
 const args = plugin.chromeArgs(plugin.Config({ chrome: { headless: true } }))
-if (!args.includes('--isolated') || !args.includes('--headless') || !args.includes('--ignoreDefaultChromeArg=--enable-automation')) fail(`chrome args: ${args}`)
+if (!args.includes('--isolated') || !args.includes('--headless') || !args.includes('--ignoreDefaultChromeArg=--enable-automation') || !args.includes('--no-performance-crux')) fail(`chrome args: ${args}`)
+if (filled.chrome.quietStderr !== true) fail('quietStderr default')
+// Default chrome.command '' = the version pinned in package.json, run by this node; args[0] is its bin script.
+const bundled = plugin.chromeServer(filled)
+const pinned = JSON.parse(await (await import('node:fs/promises')).readFile(new URL('../package.json', import.meta.url), 'utf8')).dependencies['chrome-devtools-mcp']
+if (!/^\d+\.\d+\.\d+$/.test(pinned)) fail(`chrome-devtools-mcp must be pinned exactly, got "${pinned}"`)
+if (bundled.command !== process.execPath || bundled.missing !== undefined || bundled.describe !== `bundled chrome-devtools-mcp ${pinned}` || !bundled.args[0].endsWith('/build/src/bin/chrome-devtools-mcp.js') || !existsSync(bundled.args[0])) fail(`bundled server: ${JSON.stringify(bundled)}`)
+if (args[0] !== bundled.args[0]) fail('chromeArgs must start with the bundled bin script')
+const explicit = plugin.chromeServer(plugin.Config({ chrome: { command: process.execPath } }))
+if (explicit.command !== process.execPath || explicit.args.length !== 0 || explicit.missing !== undefined) fail(`explicit command: ${JSON.stringify(explicit)}`)
+const env = plugin.chromeEnv('/tmp/x-localstorage.json')
+if (env.CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS !== '1' || env.NODE_OPTIONS !== '--localstorage-file=/tmp/x-localstorage.json') fail(`chrome env: ${JSON.stringify(env)}`)
+// stderr filter: exactly the launch boilerplate chrome-devtools-mcp 1.8.0 prints (captured from `pnpm dsh web`), nothing else.
+{
+  const { CHROME_STDERR_NOISE, isNoiseLine, readLines } = await import('../servers.mjs')
+  const boilerplate = `(node:23256) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use \`node --trace-warnings ...\` to show where the warning was created)
+
+Update available: 1.8.0 -> 1.9.0
+Run \`npm install chrome-devtools-mcp@latest\` to update.
+
+chrome-devtools-mcp exposes content of the browser instance to the MCP clients allowing them to inspect,
+debug, and modify any data in the browser or DevTools.
+Avoid sharing sensitive or personal information that you do not want to share with MCP clients.
+Performance tools may send trace URLs to the Google CrUX API to fetch real-user experience data. To disable, run with --no-performance-crux.
+
+Google collects usage statistics to improve Chrome DevTools MCP. To opt-out, run with --no-usage-statistics.
+For more details, visit: https://github.com/ChromeDevTools/chrome-devtools-mcp#usage-statistics
+[chrome-devtools-mcp] The connecting client did not negotiate the MCP roots capability. File-writing tools will be restricted to the OS temp directory. To restore the previous unrestricted behavior, start the server with --allow-unrestricted-paths.`
+  for (const line of boilerplate.split('\n')) if (!isNoiseLine(line, CHROME_STDERR_NOISE)) fail(`boilerplate not filtered: ${line}`)
+  for (const line of ['Error: Failed to launch the browser process!', '[MCP Context] Error resolving real path for /x: EACCES', 'Update your Chrome to continue', 'Could not write /tmp/x']) if (isNoiseLine(line, CHROME_STDERR_NOISE)) fail(`real message filtered: ${line}`)
+  const { PassThrough } = await import('node:stream')
+  const stream = new PassThrough(); const lines = []
+  readLines(stream, (line) => lines.push(line))
+  stream.write('ab'); stream.write('c\nde\r\n'); stream.end('tail')
+  await new Promise(resolve => stream.on('end', () => setImmediate(resolve)))
+  if (JSON.stringify(lines) !== JSON.stringify(['abc', 'de', 'tail'])) fail(`readLines: ${JSON.stringify(lines)}`)
+}
 
 // ---- preflight
 const missing = plugin.preflightFor(plugin.Config({ safari: { driver: '/nonexistent/safaridriver' }, chrome: { command: '/nonexistent/cdm' } }))
@@ -184,5 +221,81 @@ console.log('smoke ok: config + preflight')
   if (losslessReason(saved) !== undefined || 'uid' in saved || saved.fullPage !== false) fail(`chrome_save_screenshot result: ${JSON.stringify(saved)}`)
   await rm(saved.path, { force: true })
   console.log('smoke ok: results are stripped of undefined (lossless JSON)')
+
+  // chrome-devtools-mcp spills captures ≥ 2 MB to disk and answers with text only ("Took a screenshot of the
+  // current page's viewport.\nSaved screenshot to <tmp>/screenshot.png.") — the tensatory session saw four of
+  // these reported as "chrome screenshot failed: Took a screenshot …". The plugin must read the file back.
+  const { mkdtemp } = await import('node:fs/promises')
+  const { describeBlocks, savedFileOf } = await import('../servers.mjs')
+  if (savedFileOf("Took a screenshot of the current page's viewport.\nSaved screenshot to /tmp/chrome-devtools-mcp-91zev3/screenshot.png.") !== '/tmp/chrome-devtools-mcp-91zev3/screenshot.png') fail('savedFileOf: trailing period')
+  if (savedFileOf('Saved screenshot to /tmp/a b/shot.jpeg') !== '/tmp/a b/shot.jpeg' || savedFileOf('Took a screenshot.') !== undefined) fail('savedFileOf: spaces / absent')
+  if (describeBlocks({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }) !== 'text ×2' || describeBlocks({}) !== '(no content blocks)') fail(`describeBlocks: ${describeBlocks({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] })}`)
+  const pngMagic = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3])
+  const spillDir = await mkdtemp(join(tmpdir(), 'chrome-devtools-mcp-'))
+  const spillPath = join(spillDir, 'screenshot.png')
+  await writeFile(spillPath, pngMagic)
+  const replies = []
+  const scriptedConn = { callRaw: async (name, a) => { replies.push([name, a]); return scriptedConn.next() }, callText: async () => '' }
+  const scriptedSessions = { resolveChrome: async () => ({ id: 'c:2:1', pageId: 7, conn: scriptedConn, opened: false }) }
+  const scripted = createTools({ sessions: scriptedSessions, readerPool: undefined, admitImage: async () => ({ reason: 'test' }), inlineImages: new WeakMap(), preflight: () => {}, limits: { maxChars: 1000, timeoutMs: 60_000 } }, { id: 'a', session: { header: { cwd: tmpdir() } } })
+  const getShot = scripted.find(t => t.name === 'chrome_get_screenshot')
+  const render = (value) => getShot.output.render({}, value)[0].text
+  const execShot = { agent: { id: 'a', session: { header: { cwd: tmpdir() } } }, signal: new AbortController().signal }
+  scriptedConn.next = () => ({ content: [{ type: 'text', text: `Took a screenshot of the current page's viewport.\nSaved screenshot to ${spillPath}.` }] })
+  const spilledShot = await getShot.execute({}, execShot)
+  if (spilledShot.source !== 'file' || spilledShot.byteLength !== pngMagic.length || spilledShot.format !== 'png' || spilledShot.fallbackPath === undefined) fail(`spilled screenshot: ${JSON.stringify(spilledShot)}`)
+  if (losslessReason(spilledShot) !== undefined) fail(`spilled screenshot not lossless: ${losslessReason(spilledShot)}`)
+  if (!render(spilledShot).includes('wrote it to disk')) fail(`spilled render: ${render(spilledShot)}`)
+  await new Promise(resolve => setTimeout(resolve, 50)) // cleanup is fire-and-forget
+  if (existsSync(spillPath) || existsSync(spillDir)) fail('server temp capture not cleaned up')
+  await rm(spilledShot.fallbackPath, { force: true })
+  // Server error → the server's words, the target, the request, and the remedy.
+  scriptedConn.next = () => ({ isError: true, content: [{ type: 'text', text: 'Element with uid 2_57 no longer exists on the page.' }] })
+  let failure = ''
+  try { await getShot.execute({ uid: '2_57' }, execShot) } catch (error) { failure = error.message }
+  for (const needle of ['chrome_get_screenshot', 'element uid "2_57"', 'c:2:1', 'chrome-devtools-mcp said: Element with uid 2_57 no longer exists', 'Hint: uids come from chrome_snapshot', 'Request: {"uid":"2_57"}']) {
+    if (!failure.includes(needle)) fail(`stale-uid failure lacks ${JSON.stringify(needle)}:\n${failure}`)
+  }
+  // Success text but neither image nor file → says exactly what came back.
+  scriptedConn.next = () => ({ content: [{ type: 'text', text: 'Took a screenshot of the full current page.' }] })
+  failure = ''
+  try { await getShot.execute({ fullPage: true }, execShot) } catch (error) { failure = error.message }
+  if (!failure.includes('neither an image block nor a "Saved screenshot to <path>" line') || !failure.includes('Reply blocks: text') || !failure.includes('Reply text: Took a screenshot of the full current page.')) fail(`empty reply failure:\n${failure}`)
+  // Saved-to path that does not exist → names the path and the read error.
+  scriptedConn.next = () => ({ content: [{ type: 'text', text: 'Took a screenshot of the current page\'s viewport.\nSaved screenshot to /nonexistent/dir/screenshot.png.' }] })
+  failure = ''
+  try { await getShot.execute({}, execShot) } catch (error) { failure = error.message }
+  if (!failure.includes('/nonexistent/dir/screenshot.png') || !failure.includes('could not be read back: ENOENT')) fail(`unreadable spill failure:\n${failure}`)
+  // uid requested, server says it captured the viewport → NOTE in the summary.
+  scriptedConn.next = () => ({ content: [{ type: 'text', text: 'Took a screenshot of the current page\'s viewport.' }, { type: 'image', data: pngMagic.toString('base64'), mimeType: 'image/png' }] })
+  const mismatch = await getShot.execute({ uid: '1_3' }, execShot)
+  if (!(mismatch.notes?.[0] ?? '').includes('requested element uid "1_3" but chrome-devtools-mcp reports it captured the viewport') || !render(mismatch).includes('NOTE: requested element uid')) fail(`mismatch note: ${JSON.stringify(mismatch)} / ${render(mismatch)}`)
+  await rm(mismatch.fallbackPath, { force: true })
+  // uid + fullPage rejected before any server call.
+  const before = replies.length
+  failure = ''
+  try { await getShot.execute({ uid: '1_3', fullPage: true }, execShot) } catch (error) { failure = error.message }
+  if (replies.length !== before || !failure.includes('not both')) fail(`uid+fullPage: ${failure}`)
+  // MCP-SDK timeout on any forwarded tool → explained in terms of toolCallTimeoutMs, with the server tool named.
+  const snapTool = scripted.find(t => t.name === 'chrome_snapshot')
+  scriptedConn.callText = async () => { throw new Error('take_snapshot: MCP error -32001: Request timed out') }
+  failure = ''
+  try { await snapTool.execute({ verbose: true }, execShot) } catch (error) { failure = error.message }
+  for (const needle of ['chrome_snapshot: server tool take_snapshot failed: MCP error -32001', 'within 60000 ms (browser-automation toolCallTimeoutMs)', 'chrome_handle_dialog', 'Request: {"verbose":true}']) {
+    if (!failure.includes(needle)) fail(`timeout failure lacks ${JSON.stringify(needle)}:\n${failure}`)
+  }
+  // Aborted executions pass through untouched.
+  const aborted = new AbortController(); aborted.abort()
+  const abortError = new Error('aborted'); abortError.name = 'AbortError'
+  scriptedConn.callText = async () => { throw abortError }
+  let passed
+  try { await snapTool.execute({}, { ...execShot, signal: aborted.signal }) } catch (error) { passed = error }
+  if (passed !== abortError) fail('abort error was rewrapped')
+  // chrome_interact step failures carry the same hint inline.
+  const interact = scripted.find(t => t.name === 'chrome_interact')
+  scriptedConn.callText = async (name) => { if (name === 'hover') throw new Error('hover: Error: Element with uid 1_39 no longer exists on the page.'); return 'ok' }
+  const batch = await interact.execute({ interactions: [{ type: 'hover', purpose: 'hover top line', node: '1_39' }, { type: 'scroll', purpose: 'down', scrollDelta: { y: 10 } }] }, execShot)
+  if (!/#1 hover .* → FAILED: hover: Error: Element with uid 1_39 no longer exists on the page\. — Hint: uids come from chrome_snapshot/.test(batch) || !/#2 scroll .* → ok/.test(batch)) fail(`interact hints:\n${batch}`)
+  console.log('smoke ok: chrome screenshot spill-to-disk read-back, failure explanations (server words, target, request, hint, timeout), abort passthrough')
 }
 console.log(existsSync(filled.safari.driver) ? 'STP driver present: run pnpm run live:windows for the live matrix' : 'STP driver absent here')

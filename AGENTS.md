@@ -274,7 +274,10 @@ can reproduce or maintain it:
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
-  live profile row, and the attempts that failed.
+  live profile row, the attempts that failed (incl. chrome-devtools-mcp's
+  silent ≥ 2 MB screenshot spill-to-disk), and the failure-reporting layer
+  (`explainFailure` / `FAILURE_HINTS`) every `safari_*`/`chrome_*` error
+  passes through.
 - `cloudflare-remote-control.md` — phone remote control via dsh-full-remote
   behind cloudflared: install + profile patch, the 反向代理 locale bug and its
   root cause, the `taliesinb/dsh-full-remote` fork (`~/github/dsh-full-remote`,

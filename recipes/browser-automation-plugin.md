@@ -63,8 +63,10 @@ probe scripts. Chrome hides closed `<details>` children with
 `element.checkVisibility()`. `chrome-devtools-mcp` also sets a bare process
 title: `pgrep -f '--isolated'` never matches it; count your own node children.
 
-Chrome side: `chrome-devtools-mcp` (installed globally via Homebrew npm) with
-`--isolated --no-usage-statistics --ignoreDefaultChromeArg=--enable-automation`
+Chrome side: `chrome-devtools-mcp`, pinned to an exact version in the plugin's
+`package.json` and run by the host's `node` (was a Homebrew-npm global install
+until 2026-09-15; see Troubleshooting "what to update"), with
+`--isolated --no-usage-statistics --no-performance-crux --ignoreDefaultChromeArg=--enable-automation`
 (the last one removes the "controlled by automated test software" bar). One
 isolated instance per chat; "windows" are its pages, routed by `pageId`.
 
@@ -122,6 +124,31 @@ with `querySelector: "h1"` on the second, `safari_close`. Afterwards
 | rAF-based "settled" loop for screenshots | Hangs in occluded windows. `setTimeout` polling, 3 stable samples. |
 | `h.textContent = '## ' + text` to mark headings | Destroys React-owned nodes; the next re-render throws and unmounts content (bodies vanished from the extraction). Write into the first text node's `data` instead, and put a layout tick between mutations and extraction. |
 | `format: json` in window mode | Failed with "value is not lossless JSON": the 40 kB spill pointer wasn't followed and `undefined` fields leaked. Fixed in `servers.mjs` `unwrapPageContent`. |
+| Treating "no image block" from `take_screenshot` as failure | chrome-devtools-mcp 1.8.0 (`build/src/tools/screenshot.js:256`) writes any capture ≥ 2 MB to `mkdtemp(<tmp>/chrome-devtools-mcp-XXXXXX)/screenshot.png` and answers with **text only** ("Took a screenshot of the current page's viewport.\nSaved screenshot to …"). A retina viewport of a colourful page (tensatory's plasma slider, 2400×1884, 2.6–4.1 MB PNG) hit it on every plain viewport shot, and the plugin reported the server's *success* line as `chrome screenshot failed: Took a screenshot …` — nothing for the agent to act on. Fixed 2026-09-15: `captureChrome` reads the spilled file back (`servers.mjs` `savedFileOf`) and removes the per-call temp dir; failures now quote the server, name the target/request and append a remedy (`explainFailure` / `FAILURE_HINTS` in `curated-tools.mjs`). Regression case in `scripts/smoke-config.mjs`. |
+
+## Failure reporting (what an agent sees when a tool fails)
+
+Every `safari_*`/`chrome_*` failure passes through `explainFailure` in
+`curated-tools.mjs` (the same wrapper that strips `undefined`):
+
+- `<curated tool>: server tool <raw name> failed: <server's own words>` — the
+  raw MCP tool name (`take_snapshot`, `evaluate_javascript`, …) is kept for
+  provenance because the model never sees those names otherwise.
+- MCP-SDK timeouts (`-32001 Request timed out`) are explained in terms of
+  `toolCallTimeoutMs` with the usual causes (blocking dialog, endless
+  navigation, hung script) and the way out (`*_handle_dialog`, `*_close`).
+- `Request: {…}` — the call's arguments, so the failure text is self-contained.
+- `Hint: …` — the first matching remedy from `FAILURE_HINTS` (stale uid →
+  re-snapshot; open dialog → handle it; page closed → reopen; not-interactive
+  element → scroll/wait; `no element matches` → check the selector; model has
+  no image input → `read_image`). `chrome_interact` step reports carry the
+  same hint inline. Add a row there when a new opaque server message shows up.
+- Screenshots additionally report size/format, whether the capture was read
+  back from disk, and a `NOTE:` when the server says it captured something
+  other than what was requested (uid asked, viewport delivered). Safari's
+  capture checks that `safaridriver` actually wrote the file it claims to have
+  written. Aborts (`AbortError`) pass through untouched so DSH still
+  recognises a stopped turn.
 
 ## Troubleshooting
 
@@ -132,3 +159,10 @@ with `querySelector: "h1"` on the second, `safari_close`. Afterwards
 | STP keeps running with no windows | An older build before `SafariInstanceOwner`; or a driver was SIGTERM'd. `osascript -e 'quit app "Safari Technology Preview"'`. |
 | Read is missing a section that is visibly on the page | It is collapsed. Pass `expand: true` (window mode) or use `safari_get_page_structure` → `section:`. The header's `NOTE:` says what stayed collapsed. |
 | Chrome shows the automation infobar | `chrome.hideAutomationBanner` was turned off. |
+| `chrome screenshot failed: Took a screenshot of the current page's viewport. Saved screenshot to /tmp/chrome-devtools-mcp-…/screenshot.png.` | Host is running a plugin build older than 2026-09-15: the capture was ≥ 2 MB and spilled to disk (see Failed attempts). Restart `dsh web` to load the fix; meanwhile `read_image` the quoted path, or request `format: "jpeg"` / a `uid` crop to stay under 2 MB. |
+| Screenshot summary says `(≥ 2 MB: chrome-devtools-mcp wrote it to disk; read back by the plugin …)` | Informational. The image is fine; use `format: "jpeg"` or a `uid` crop if payload size matters. |
+| `Element with uid N_M no longer exists on the page` / `Element uid "…" not found on page` | uids are minted by `chrome_snapshot` and die on re-render/navigation. Re-snapshot; never reuse a uid across a `chrome_navigate` or after clicking something that re-renders. |
+| `MCP error -32001: Request timed out` | The browser server stalled for `toolCallTimeoutMs` (60 s default). Check for a blocking dialog (`chrome_handle_dialog` / `safari_handle_dialog list`), then `*_close` and reopen if it persists. |
+| Leftover `/tmp/chrome-devtools-mcp-*/screenshot.png` (2–4 MB each) | Spilled captures from before the fix; the plugin now removes the per-call dir after reading. Safe to delete. |
+| `pnpm dsh web` terminal spammed per Chrome launch: `Update available`, `exposes content of the browser instance…`, `Performance tools may send trace URLs…`, `did not negotiate the MCP roots capability…`, `ExperimentalWarning: localStorage…` | Plugin build older than 2026-09-15. Since then: `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1`, `--no-performance-crux`, `roots` capability (session cwd) instead of `--allow-unrestricted-paths`, `NODE_OPTIONS=--localstorage-file=<tmp>/dsh-chrome-…-localstorage.json`, and piped+filtered stderr for the disclaimer (no flag exists). Table in the plugin README, "A quiet dsh web terminal". `chrome.quietStderr: false` shows everything again. Unfiltered lines appear as `browser-automation: chrome-devtools-mcp c:<n>: …` warnings and `chrome-stderr` trace events. |
+| `Update available: 1.8.0 -> 1.9.0` — what to update? | Since 2026-09-15 the server is a **pinned exact dependency** of the plugin (`plugins/browser-automation/package.json`, `chrome-devtools-mcp: "1.9.0"`), run by the host's `node` (`chromeServer()` in `index.js`; `chrome.command: ''`). Upgrade: edit the version, `pnpm install` in the plugin dir, `pnpm run check` (asserts exact pin + bin present, greps nothing else), skim the upstream CHANGELOG for `screenshot.js` (the ≥ 2 MB spill) and `McpPage.js` uid messages (our `FAILURE_HINTS` match them), restart `dsh web`. The global `/opt/homebrew/bin/chrome-devtools-mcp` (1.8.0) is no longer used; `npm rm -g chrome-devtools-mcp` is safe, or point `chrome.command` at it to compare versions. The banner itself is suppressed by `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS`. |

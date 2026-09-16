@@ -140,6 +140,34 @@ MCP bridge (the model must declare image input; otherwise a temp file path is
 returned). Verified pixel-exact on iana.org's `h1` and a below-the-fold
 `footer`. Chrome element capture uses the server's native `uid` screenshots.
 
+Chrome's `take_screenshot` has **two success shapes**: an image block, or —
+for captures ≥ 2 MB (chrome-devtools-mcp `screenshot.js:256`, 1.8.0 and 1.9.0; a retina
+viewport of a colourful page gets there easily) — a text-only reply
+`Took a screenshot of …\nSaved screenshot to <tmp>/chrome-devtools-mcp-XXXXXX/screenshot.png.`
+`captureChrome` handles both (`servers.mjs` `savedFileOf`), deletes the
+server's per-call temp dir after reading, and says so in the summary
+(`4.2 MB png (≥ 2 MB: chrome-devtools-mcp wrote it to disk; read back …)`).
+Before this, the plugin echoed the server's success line as
+`chrome screenshot failed: Took a screenshot …` — the uninformative message
+seen in the tensatory session.
+
+## Failure reporting
+
+All curated tools share one wrapper (`explainFailure`, `FAILURE_HINTS` in
+`curated-tools.mjs`) that turns a raw failure into something the model can act
+on: `<curated tool>: server tool <raw name> failed: <server's words>`, a plain
+reading of MCP-SDK timeouts (`toolCallTimeoutMs`, blocking dialog, endless
+navigation), `Request: {…}` with the call's arguments, and a `Hint:` remedy for
+known messages (stale uid → `chrome_snapshot` again; dialog open →
+`*_handle_dialog`; page closed → reopen; element not interactive →
+scroll/wait; `no element matches` → check the selector; model without image
+input → `read_image`). `chrome_interact` step reports get the same hint
+inline. Screenshot failures name the target and window and quote the server's
+exact reply plus the content blocks received; a requested-vs-captured mismatch
+("uid asked, viewport delivered") is a `NOTE:` on success. `AbortError`s pass
+through untouched. When a new opaque server message turns up, add a row to
+`FAILURE_HINTS` and a case to `scripts/smoke-config.mjs`.
+
 ## Requirements
 
 - **Safari**: Safari Technology Preview 247+ (or Safari 27) with Develop ▸
@@ -147,10 +175,37 @@ returned). Verified pixel-exact on iana.org's `h1` and a below-the-fold
   in the background; the user's regular Safari is never touched. There is no
   classic-Safari fallback (stable Safari's driver has no `--mcp`); tools fail
   with an explanatory message when STP is missing.
-- **Chrome**: `npm i -g chrome-devtools-mcp` (1.8.0 here) and Google Chrome.
-  Launched with `--isolated`, `--no-usage-statistics`, and
-  `--ignoreDefaultChromeArg=--enable-automation` (no "controlled by automated
-  test software" bar; `chrome.hideAutomationBanner`).
+- **Chrome**: Google Chrome, plus `chrome-devtools-mcp` **pinned in this
+  plugin's `package.json`** (exact version, currently 1.9.0; `pnpm install` in
+  the plugin directory installs it — one package, ~14 MB, it bundles its own
+  deps). The default `chrome.command: ''` runs that bin script
+  (`node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js`)
+  with the host's own `node` (`process.execPath`), so PATH, shebangs and
+  global installs play no part. Upgrade = edit the version, `pnpm install`,
+  `pnpm run check`, restart `dsh web`; the smoke test asserts the pin is
+  exact and the bin exists. Setting `chrome.command` to a path (e.g. the old
+  `/opt/homebrew/bin/chrome-devtools-mcp` from `npm i -g`) uses that binary
+  verbatim instead. Launched with `--isolated`, `--no-usage-statistics`,
+  `--no-performance-crux` and `--ignoreDefaultChromeArg=--enable-automation`
+  (no "controlled by automated test software" bar; `chrome.hideAutomationBanner`).
+
+### A quiet `dsh web` terminal
+
+chrome-devtools-mcp (1.8.0 and 1.9.0 alike) prints ~12 lines of stderr per launch. Each is
+switched off at its source where a switch exists, and the one that has none is
+filtered (`servers.mjs` `CHROME_STDERR_NOISE`, `index.js` `chromeSpec`):
+
+| Line | Off switch |
+|---|---|
+| `Update available: 1.8.0 -> 1.9.0` (+ a daily `npm view` subprocess) | env `CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS=1` |
+| `Performance tools may send trace URLs to the Google CrUX API…` | `--no-performance-crux` |
+| `The connecting client did not negotiate the MCP roots capability…` | the client declares `roots` and answers `roots/list` with the session cwd — quiet, and file-writing tools stay scoped (cwd + the server's temp dir) instead of `--allow-unrestricted-paths` (which 1.9.0 turns on by default for its CLI; our roots still win) |
+| `(node:N) ExperimentalWarning: localStorage is not available…` | env `NODE_OPTIONS=--localstorage-file=<tmp>/dsh-chrome-<pid>-<session>-localstorage.json` (4 kB, removed when the instance's process ends) |
+| `chrome-devtools-mcp exposes content of the browser instance…` (3 lines) | no flag exists: stderr is piped (`stderr: 'pipe'`), these lines dropped, everything else goes to `ctx.logger.warn` + `traceFile` as `chrome-stderr` events |
+
+`chrome.quietStderr: false` forwards every line to the logger instead of
+filtering (useful when the server misbehaves). Safari's driver still inherits
+stderr — it has never been noisy.
 
 ## Install
 
