@@ -213,6 +213,19 @@ DSH_HOME=/tmp/tailscale-remote-home pnpm dsh web --patch /tmp/tailscale-remote-p
 - `chrome_fill` on the users `<Input>` did **not** trigger React's onChange
   (Save stayed disabled); typing did. Not a plugin bug.
 
+## Live install (done 2026-09-16)
+
+Live checkout `~/github/deepseek-harness` is now on `fix/tailscale-mounting`
+(`1c80583ba3`), reinstalled and rebuilt; the worktree was removed (git allows
+a branch in one worktree only). `dsh-full-remote` was removed from the web
+profile (`pnpm dsh plugin --profile web remove -w dsh-full-remote`); its
+`- id: reverse-proxy` config block in `~/.dsh/profiles/web/cordis.patch.yml`
+and `~/.dsh/reverse-proxy.json` / `.audit.jsonl` are leftovers to delete. The
+plugin row lives at the top of the profile patch's `insert` list; state at
+`~/.dsh/tailscale-remote.json`. The dev overlay no longer carries the row
+(duplicate id would fail a preview boot; the preview also could not bind
+:3083 while the live one runs).
+
 ## Using it
 
 1. Run DSH from `fix/tailscale-mounting` (see above) with the plugin row in

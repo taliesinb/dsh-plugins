@@ -8,7 +8,10 @@
 # renamed id would load the plugin twice (double tools, double servers).
 #
 # Live profile owns: enforce-model-preset, browser-automation, dash-docsets,
-# local-model-supervisor, notion-mcp, wolfram-kernel-supervisor, reverse-proxy.
+# local-model-supervisor, notion-mcp, wolfram-kernel-supervisor,
+# foreign-link-opener, settings-shortcut, tailscale-remote (2026-09-16; it
+# also binds 127.0.0.1:3083 and owns the /dsh serve route, so a preview must
+# not load it — or must set another listenPort/mountPath).
 # This overlay only adds what is NOT there: agent-status-indicator and the
 # preview-only red identity.
 #
@@ -26,9 +29,3 @@
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity
       name: '/Users/tali/github/tali-dash-plugins/plugins/preview-identity/index.js'
-    # Tailscale remote: DSH at https://<node>/dsh/ behind an authenticating
-    # loopback proxy (127.0.0.1:3083). Needs DSH branch fix/tailscale-mounting.
-    # Disabled until Enable is pressed in Settings → Tailscale remote; if the
-    # live profile also runs it, give one of them another listenPort.
-    - id: tali-tailscale-remote
-      name: '/Users/tali/github/tali-dash-plugins/plugins/dsh-tailscale-remote/index.js'
