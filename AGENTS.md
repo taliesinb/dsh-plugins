@@ -313,21 +313,17 @@ can reproduce or maintain it:
   packed-chunk-row traps).
 - `preview-identity.md` — red icon + "DSH-dev" label for the preview server,
   and the dev-overlay/live-profile collision rule.
-- `session-introspect-design.md` — **design, not yet built**: model-facing
-  `transcript_*` tools for reading *other* agents' transcripts (find by
+- `session-introspect-plugin.md` — model-facing `transcript_*` tools for
+  reading *other* agents' transcripts (`session-introspect` plugin: find by
   `workspace/title`, per-turn outline, timeline render, per-tool error/latency
-  stats, grep; `fmt` text/json/jsonl and `out_file` on every tool) over
-  `ctx.sessionQuery`; the survey of what exists
+  stats with what-happened-next, grep, raw event; `fmt` text/json/jsonl and
+  `out_file` via `ctx.fs` on every tool) over `ctx.sessionQuery`; the survey
   (in-tree `tool-session-query` is unmounted and same-cwd-only; the `@session`
   mention drops tool events), the five-session evidence of agents hand-decoding
-  `~/.dsh/sessions/*/session*.jsonl.zstd`, and the `session.v3.jsonl.zstd`
-  stale-copy trap.
-- `remote-workspaces-plugin.md` — another DSH server's workspaces in this
-  sidebar (`dsh-remote-workspaces` plugin): same-origin egress proxy
-  `/remote/<srv>/` framing the remote's `?embed=<session>` page, host-to-host
-  RPC (list/new/rename/archive), the DSH branch `feat/embed-session` (embed
-  mode + per-embed localStorage namespace, `workspace.list`, sidebar seats),
-  the two-instance test, and the RPC parameter-name / center-column traps.
+  `~/.dsh/sessions/*/session*.jsonl.zstd`, the on-disk format census and the
+  `session.v3.jsonl.zstd` stale-copy trap, the headless end-to-end test method
+  against a copied home, and the first corpus-wide findings (incl. 11 sessions
+  the current reader refuses).
 - `settings-keyboard-shortcut-plugin.md` — ⌘. toggles the web GUI Settings
   panel (`settings-shortcut` plugin): why ⌘, is impossible in Safari (the
   app consumes it before the page), the component-local open state that

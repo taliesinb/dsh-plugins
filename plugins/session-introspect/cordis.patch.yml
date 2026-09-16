@@ -1,0 +1,6 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: every session on the machine is visible (scope: all). Override
+# `config` in the profile's cordis.patch.yml (a later layer replaces the whole value).
+- insert:
+    - id: tali-session-introspect
+      name: tali-session-introspect

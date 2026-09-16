@@ -1,9 +1,29 @@
-# `session-introspect` — cross-agent transcript introspection tools (design)
+# `session-introspect` — cross-agent transcript introspection tools
 
-**Status:** design, not yet built (2026-09-16). **Decision owner:** Tali.
-**Decided so far:** design doc before code; default visibility = every
-session on the machine (all workspaces); `fmt` text/json/jsonl on every
-tool; `out_file` on every tool (which absorbed the earlier `transcript_export`).
+**Status:** built and verified end-to-end 2026-09-16 (`plugins/session-introspect`,
+24 tests, two headless runs against a copied home); mounted in the **dev
+overlay** (`cordis.dev.yml`) only — **not yet in the live web profile** (that
+is one `insert` row in `~/.dsh/profiles/web/cordis.patch.yml`, hot-reloading,
+so it waits for an explicit go-ahead). Plugin README:
+[`plugins/session-introspect/README.md`](../plugins/session-introspect/README.md);
+generated tool reference: `plugins/session-introspect/docs/tools.md`.
+
+Decisions taken along the way: design doc before code; visibility = every
+session on the machine (`scope: all`); `fmt` text/json/jsonl on every tool;
+`out_file` on every tool (which absorbed a planned `transcript_export`).
+
+## 0. Quick use
+
+```
+transcript_find query:"slider"                                   → ids, workspace/title, created, live
+transcript_outline session:"tensatory/interval-slider-proto"    → one line per turn, seq ranges, ✗ per tool, tokens, how it ended
+transcript_read session:"…" turn:4 tools:["chrome_*"]            → timeline: CALL / RESULT ✓✗ latency code excerpt
+transcript_read session:"…" errors_only:true                     → only failing calls (+ the assistant text right after)
+transcript_tool_stats sessions:["*"] tools:["chrome_*","safari_*"] → corpus-wide ergonomics report (see §4)
+transcript_grep pattern:"fell back|fallback" sessions:["tensatory/*"] kinds:["result"]
+transcript_event session:"…" seq:1189 before:1 after:2          → the full raw event
+transcript_read session:"…" raw:true fmt:"jsonl" out_file:"x.jsonl" → export the decoded log for bash/python
+```
 
 ## 1. The problem
 
@@ -298,37 +318,78 @@ agent know how to repair its request?"* — the question that motivated
 - **Cache** decoded snapshots per `(id, event count)` for the plugin's
   lifetime; a large log (`loss-landscape`, 43 k events) is read once per
   question, not once per tool call.
-- **Prompt cost.** Six schemas ≈ 1.3–1.8 k tokens per request. Acceptable for
-  the `standard` preset on this machine; if not, mount only in a dedicated
-  `introspect` preset (see `enforce-model-preset`) or gate behind an
-  `introspect_enable` tool. Decide after measuring with `request/header`.
+- **Prompt cost.** Measured: six schemas ≈ 2.5 k tokens per request (10 kB of
+  JSON). Acceptable for the `standard` preset on this machine; if not, mount
+  only in a dedicated `introspect` preset (see `enforce-model-preset`).
 
-### 2.5 Implementation plan
+### 2.5 What was built (2026-09-16)
 
-1. `plugins/session-introspect/{package.json, index.js, resolve.mjs, render.mjs,
-   stats.mjs, tools.mjs, README.md, cordis.patch.yml}` — ESM, no build step
-   (host-only, like `dash-docsets`). `link:` devDependency on
-   `<dsh-src>/packages/session-query/session-query` for types.
-2. Verify `ctx.sessionQuery` is reachable from a profile-layer row (it is a
-   base-layer host service; `dsh-session-reference` consumes it the same way).
-   If the row is pending, `cordis_inspect_query` on the preview server shows why.
-3. Golden tests against real logs: replay `readSession`-shaped fixtures
-   exported from `session-cec83493` (web-automation-errors) and
-   `session-c96f22a9` (repeated-images) through the renderer; assert the
-   outline turn count, the ✗ count for `chrome_get_screenshot`, and that no
-   base64 survives.
-4. Trial on the isolated preview server ([PREVIEWING.md](../PREVIEWING.md)) by
-   re-asking the `web-automation-errors` question and counting calls-to-first-
-   analysis (target: 1–2 instead of 5–9).
-5. Only on explicit approval: one `insert` row in
-   `$DSH_HOME/profiles/web/cordis.patch.yml` (live hot-reload — see the
-   warning at the top of [AGENTS.md](../AGENTS.md)).
-6. Rename this file to `session-introspect-plugin.md` once built and update
-   the recipe index.
+`plugins/session-introspect/` — host-only ESM, no build step, `inject:
+['tools', 'sessionQuery']`, tools registered globally via `ctx.tools.register`
+(read-only, no per-session state; subagents see them too):
+
+| File | Role |
+|---|---|
+| `index.js` | `name`, `inject`, `Config` (schemastery), `build(ctx, config)` shared with tests, `apply` |
+| `resolve.mjs` | session addressing; titles via `sessionProjections.snapshot` (live) → `sessionProjectionCache.cachedSnapshot` / `cachedPredecessorTitle` (cold) → `readTitleSnapshots` fold only for the rest; snapshot cache; `models()` = skip-and-report for corpus tools |
+| `model.mjs` | `readSession()` snapshot → timeline rows, paired calls (latency, ok, code, text, images), per-turn records (prompt, tool counts, `turn/end` reason, `usage` tokens) |
+| `stats.mjs` | per-tool aggregates, normalized error groups, after-error bigrams |
+| `render.mjs` | text renderings + `toJson` / `toJsonl` |
+| `output.mjs` | `fmt` dispatch, notice line, `dropUndefined`, `boundRows`, `writeOutFile` via `ctx.fs` + `ctx.sandboxPolicy` |
+| `tools.mjs` | the six `defineTool` definitions |
+| `tests/` | `node --test`; fixtures are trimmed real logs (`scripts/make-fixture.mjs` drops `stream`, `meta`, the request tool catalog, clips strings) |
+| `scripts/smoke-log.mjs` | dev aid: render a **v3** log file directly through the pure code |
+
+DSH facts the implementation depends on (verified in the checkout, 2026-09-16):
+
+- `ctx.sessionQuery.readSession(id)` → `{ session, inheritedEventCount, events }`, live-preferred, historical generations migrated in memory (`session-persistence-jsonl` README, "open").
+- `defineTool` (`@deepseek-ai/dsh-tools`): `execute` returns the canonical value, `output.render(args, value)` renders; the registry snapshots the value as **lossless JSON — `undefined` members fail the call** (`INVALID_TOOL_OUTPUT: value is not lossless JSON`; hence `dropUndefined`). `isConcurrencySafe` is wrapped by arg validation.
+- `ctx.fs` is `dsh-fs-sandbox` in the base bundle: `resolve(path, { cwd })` + `writeText(target, text, undefined, signal, policy)` with `policy = ctx.get('sandboxPolicy').resolve({ session })`; denial code `FS_SANDBOX_DENIED`; parents are created (`fs-local/fsio.ts` `mkdir recursive`).
+- Titles without log reads: `ctx.get('sessionProjections').snapshot(session, ['title']).values.title` (live) and `ctx.get('sessionProjectionCache').cachedSnapshot(header, 0, ['title'])` (cold) — the same path `dsh-session-reference` uses for the `@` picker. On this machine 52 of 59 titles came from the cache; 7 needed a fold.
+- `assistant/message.data.usage` carries `outputTokens` / `totalTokens` per step → per-turn `out N · ctx M` in the outline.
+- v3 image blocks are attachment references (`attachment.width/height/bytes/mediaType`), no inline base64.
+
+### 2.5a Verification
+
+1. `pnpm check` in the plugin: 24 tests over two fixtures (`web-automation-errors`, the headless self-test) and a fake `ctx` (sessionQuery / fs / sandboxPolicy) covering every addressing form, `fmt`, `out_file` + sandbox denial, bounding/continuation, corpus selectors, skip-and-report.
+2. **Headless end-to-end** without the GUI (no launch token needed), against a copy of the live home so nothing live is touched:
+
+   ```sh
+   H=/tmp/dsh-introspect-home; mkdir -p $H
+   cp ~/.dsh/settings.yaml ~/.dsh/.credentials.yaml $H/
+   rsync -a ~/.dsh/sessions/ $H/sessions/; rsync -a ~/.dsh/storages/ $H/storages/
+   cat > $H/overlay.yml <<'EOF'
+   - insert:
+       - id: tali-session-introspect
+         name: '/Users/tali/github/tali-dash-plugins/plugins/session-introspect/index.js'
+         config: { traceFile: /tmp/dsh-introspect-trace.log }
+   EOF
+   cd ~/github/deepseek-harness   # must run from the checkout: tsx + vendor/cordis resolve from there
+   DSH_HOME=$H pnpm -s dsh --profile headless --patch $H/overlay.yml "Do exactly: (1) call transcript_find … Then reply with each tool's first result line verbatim."
+   ```
+
+   The headless profile uses `agent-default-model` from `settings.yaml`; the
+   run's own session lands in `$H/sessions/<checkout-ws>/` and can be
+   inspected with the tools (or `scripts/smoke-log.mjs`) — the recursion works.
+   Measured: `tensatory/interval-slider-proto` (v0-only, 1291 events) read in
+   140–170 ms; `initial-review` (v0, 4860 events) in 451 ms; all 62 sessions
+   for a corpus-wide stats call in ~6 s cold, cached afterwards.
+
+### 2.5b What failed and why
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `transcript_find` → `INVALID_TOOL_OUTPUT: value is not lossless JSON` | `hint: undefined` in the canonical value | `dropUndefined()` on every value before return |
+| `node --import tsx/esm apps/cli/src/bin.ts` from another cwd → `Cannot find package 'tsx'`, then `'@deepseek-ai/cordis' does not provide FiberState` | module resolution is anchored to the checkout | run `pnpm -s dsh` **from the checkout**; use absolute `out_file` paths |
+| corpus-wide `transcript_tool_stats sessions:["*"]` failed outright | one session DSH's reader refuses kills the whole call | `resolver.models()` skips and reports (`skipped[]` + "could not be read" list); single-session tools still surface the diagnostic verbatim |
+| `errors_only` view was all prompts and turn markers | it kept markers of every turn | keep markers/prompts only for turns that contain a failure |
+| model passed a grep hit's `seq` to `transcript_event` with the wrong `session` | multi-session hits only named the session in a group header | every hit line carries `<shortId> [seq]` when >1 session is searched |
+| the first "ambiguous" probe in the tests was not ambiguous | `session` matched one title via the slug tier | probes use a truly shared substring; ambiguity listing now shows each cwd (two workspaces can share a basename: `~/projects/deepseek-harness` vs `~/github/deepseek-harness`) |
+| schema cost 3.0k tokens | shared `session`/`fmt`/`out_file` descriptions repeated in six schemas | trimmed to essentials → ~2.5k tokens (the tool descriptions themselves are left teaching-length) |
 
 ### 2.6 Non-goals / later
 
-- Writing or repairing logs (stays in `tools/`).
+- Writing or repairing logs (stays in `tools/`); the 11 refused sessions in §4 are a `tools/` job.
 - Full-text ranking across the corpus (`transcript_grep` is a regex scan;
   enabling SQLite FTS is a separate, in-tree config decision).
 - A client half (e.g. a right-click "inspect in new session" on the sidebar).
@@ -336,3 +397,15 @@ agent know how to repair its request?"* — the question that motivated
   its pick paste a `transcript_find`-ready id.
 - Cross-machine transcripts (remote workspaces) — out of scope until
   `dsh-remote-workspaces` settles.
+
+## 3. Findings from the first corpus-wide run
+
+`transcript_tool_stats sessions:["*"] tools:["chrome_*","safari_*"]` over 53
+readable sessions (728 calls, 56 errors) — the report the earlier agents each
+spent 5–9 calls per session approximating:
+
+- `chrome_save_screenshot` **30 % error rate** (18/61), `chrome_get_screenshot` 13 %: ×17 the uninformative fallback `Error: chrome screenshot failed: Took a screenshot of the current page's viewport.` — the exact message `web-automation-errors` set out to fix. After it, agents switched to `read_image` (×14) or `bash` (×8); one retried identically.
+- ×10 `tool "…" returned invalid output: value is not lossless JSON` across `chrome_save_screenshot` (×7), `safari_get_page_content` (×2), `chrome_get_screenshot` (×1) — the same `undefined`-in-canonical-value bug this plugin hit; worth a sweep of `browser-automation`.
+- `chrome_evaluate_expression`: ×10 `Execution context was destroyed, most likely because of a navigation`, followed ×10 by a retry with changed args — the tool could say "wait for the navigation, then re-evaluate".
+- **11 sessions are refused by DSH's current reader** (3 native v0 logs — `deepseek-harness/wolfram-tool`: `agent/inbox/spliced 46592 inserted message lacks required member "id"` (the `content.some` bug class, see `plugin-inject-string-content-bug.md`); `loss-landscape/loss-landscape` and `laptop/web-iteration-demo (1)`: `assistant/message … chunk references are not one complete ordered attempt` — and all 8 imported `pi-*` / `claude-*` sessions: `format v2 surface before first step cannot acquire a system head without changing chronology`). These will presumably fail to open in the GUI after the 2026-09-16 upgrade too; `transcript_tool_stats sessions:["*"] fmt:"json"` lists them with full diagnostics. Not this plugin's bug — but it is the first tool that shows the list.
+
