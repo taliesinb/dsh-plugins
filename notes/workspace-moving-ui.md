@@ -1,0 +1,147 @@
+# Moving sessions and rehoming workspaces — UI design
+
+Status: **agreed design, implementation starting** (2026-09-16). Supersedes the
+surface proposed in [`workspace-moving-tools.md`](workspace-moving-tools.md); that
+note's mechanics (header `cwd` is membership; lease = liveness test; inbox-spliced
+notice; subagent children move with parents) stand and are referenced here rather
+than repeated. Target fork branch: `feat/embed-session` (worktree
+`~/github/deepseek-harness-embed`, DSH `0.1.6-alpha.1`).
+
+## 1. Decisions
+
+- **First-class fork operation, not a plugin over private seams.** The
+  `replaceHeaderIndex` / header-index internals the third-party plugin used do not
+  exist in our fork (persistence memoizes stored logs differently). `session.move`
+  lives inside the fork where it can use package-internal persistence code and be
+  tested; a model-facing tool may call it later but is not the surface.
+- **Sidebar actions, both local and remote:** "Move to…" on a session row, "Rehome…"
+  on a workspace row, plus **drag a session onto another workspace = move**.
+- **Menu contributions are data, not React.** A registry
+  (`ctx.uiWorkspace.contributeSessionMenu / contributeWorkspaceMenu`) that rows read
+  when building their `Menu`; `dsh-remote-workspaces` rows consume the same registry
+  so remote rows get identical items.
+- **Live sessions:** offer *stop-and-move* (dispose the resident agent, move cold,
+  resumes in the new workspace on next open). Never move a live session in place.
+- **Cross-host moves keep the source as an archived copy** (tombstone title
+  "moved to <host>/<workspace>") until the user deletes it; the one place a bug
+  would lose work.
+- **Membership is exact-path**, so moving into a workspace on the same tree
+  (a subfolder) still rewrites `cwd`.
+- **Notice is mandatory** (`agent/inbox/spliced`, `target: 'next-step'`,
+  `source: {kind:'plugin'|'system'}`), surfaces at the next prompt even with no
+  pending turn. Cross-host wording adds: earlier file references may not resolve.
+- **Upstream later:** `session.move` + menu seats are generic (PR candidates); the
+  cross-host relay stays in the plugin.
+
+## 2. Fork work
+
+### 2.1 Host: `session.move` / `moveMany` (Session Controller)
+
+```ts
+move({ sessionId, destination: { workspaceId } | { path }, stopLive?: boolean, notify?: boolean })
+  → { sessionId, workspaceId, moved: SessionId[] /* incl. children */ }
+moveMany({ sessionIds, destination, stopLive?, notify? })
+  → { moved, skipped: { sessionId, reason: 'live' | 'missing' | 'error', message? }[] }
+```
+
+Persistence primitive `relocate(id, newCwd, { appendEvents })` in
+`session-persistence-jsonl`:
+
+1. `acquireWriteLease` → `SessionAlreadyOwnedError` ⇒ `live`. With `stopLive`, the
+   controller disposes the resident Agent first (same path as closing), then retries.
+2. Read current log (v0→v3 migration already published by `open('write')`), rewrite
+   header `cwd`, append the notice event, validate every row through the generation
+   format, re-encode (header frame + events).
+3. Backup under `$DSH_HOME/session-move-backups/<uuid>/` → write under
+   `sessions/<projectKey(new)>/<id>/` → tombstone the old dir → invalidate the
+   memoized stored log and the projcache entry (`identity.cwd`) →
+   `old.detachSession` / `new.attachSession` → emit `session/moved` (Client list
+   and Workspace projections update) → rollback on any failure.
+4. Same-cwd subagent children whose `parentSession` is in the set move too.
+
+**Rehome** = `workspace.create(dest)` if needed (title kept) + `moveMany(members +
+children)` + report skipped + optional `workspace.delete(source)` when empty.
+
+Notice text (permission clause from the last `sandbox/mode` event; omitted for
+`danger-full-access`):
+
+> NOTE: this session's workspace was changed from `A` (/path/a) to `B` (/path/b);
+> your current permissions of `Workspace Write` now grant access to this new directory.
+
+Tests: on a copied throwaway home — cold move, live refusal, stop-and-move,
+children follow, rollback on injected failure, projcache miss-not-error, notice
+visible on first turn after resume, sandbox root in the runtime-context snapshot.
+
+### 2.2 Client: menu contributions + modals + DnD (`ui-workspace`)
+
+- Registry on `ctx.uiWorkspace`: `contributeSessionMenu(entry)` /
+  `contributeWorkspaceMenu(entry)` with
+  `{ id, label, icon?, order, danger?, when?(target), run(target) }`; targets
+  `{ sessionId, workspaceId?, title }` and `{ workspaceId, path, title }`. Rows
+  append contributions after the built-ins; a `session.moved` / registry change
+  re-renders.
+- Built-in contributions (shipped in `ui-workspace` itself): **Move to…** (session),
+  **Rehome…** (workspace).
+- **Move modal:** destination list = existing workspaces (local; remote ones
+  contributed by the plugin, grouped by server) + "New workspace from directory…"
+  (reuses `WorkspacePickFlow` / `sidebar.workspaces.directoryFlow`). Live session ⇒
+  checkbox "Stop the running session and move it" (default off, Move disabled until
+  ticked). "Tell the agent" checkbox default on.
+- **Rehome modal:** same destination picker; shows member count, live count; options
+  "also move live sessions (stops them)", "delete the empty source workspace",
+  "tell each agent"; result summary lists stragglers.
+- **DnD:** the tree's existing session drag accepts a drop on another workspace row
+  (or into its member list) ⇒ `move`. Live session drop ⇒ the Move modal opens
+  pre-filled instead of moving silently. Remote group rows are drop targets through
+  the plugin (see §3).
+
+### 2.3 Host: `session.export` / `session.import` (cross-host)
+
+- `export({ sessionId })` → `{ header, log: <current-format rows>, attachments: { sha256 → base64 }[] }`
+  (only blobs the log references; the existing session-log download route is the
+  precedent). Size-capped; large sessions stream in chunks (`mode: 'stream'`).
+- `import({ workspaceId | path, bundle, keepId?: boolean })` → `{ sessionId }`:
+  writes the log under the destination cwd with a rewritten header, ingests
+  attachments into `attachments/v1/`, attaches to the workspace, appends the
+  cross-host notice; on id collision re-ids and records `session/imported` with the
+  origin. Refuses when a live session owns the id.
+
+## 3. Plugin work (`dsh-remote-workspaces`)
+
+- Remotes rows build their `…` menus from the same registry (local contributions
+  gain remote targets: `{ sessionId, remote: { serverId, workspaceId } }`).
+- Destination picker: plugin contributes remote workspaces (from cached snapshots;
+  probes on open) to the Move/Rehome modals.
+- Relay in the host half (all via egress `call`):
+
+| Move | Mechanism |
+|---|---|
+| remote → same remote, other workspace | remote `session.move` |
+| local → remote | local `export` → remote `import` → local archive + tombstone title |
+| remote → local | remote `export` → local `import` → remote archive |
+| remote A → remote B | local host relays `export` → `import` |
+
+- DnD: remote group rows accept local and remote session drops; local workspace rows
+  accept remote session drops (plugin registers a drop handler with the tree).
+- Cross-host id/cwd facts: ids are uuids (collision handled by `keepId=false`
+  fallback); `cwd` always rewritten to the destination's path; hosts may differ in
+  OS/home — the notice says so.
+
+## 4. Order of work
+
+1. Fork host: `relocate` + `session.move`/`moveMany` + `session/moved` + notice +
+   tests. **Unblocks the concrete migration from the tools note** (one-off script
+   calling the Remote; recipes-workspace → `tali-dash-plugins`).
+2. Fork client: contribution registry, Move/Rehome modals, cross-workspace DnD.
+3. Fork host: `export`/`import` with attachment bundling.
+4. Plugin: registry consumers on remote rows, remote destinations, relay, DnD.
+
+## 5. Pointers
+
+- Mechanics + reference implementation notes: `workspace-moving-tools.md`.
+- Menus: `packages/client/ui-workspace/src/client/rows/Rows.tsx` (`sessionMenuItems` ~417, `workspaceMenuItems` ~129); DnD wiring there and in `tree.ts`.
+- Destination picker: `WorkspacePickFlow` in `rows/WorkspaceBrowser.tsx`.
+- Persistence: `packages/session/session-persistence-jsonl/src/index.ts` (`open`, `acquireWriteLease`, `locate`, `memoizeStoredLog`, `resolveCurrentLog`), `format.ts` (`projectKey`, sessionDir).
+- Registry: `packages/workspace/workspace/src/entity.ts` (`attachSession` 109, `detachSession` 174).
+- Session Controller: `packages/api/session-controller/src/{commands,agent,control}.ts`.
+- Remote-workspaces plugin: `plugins/dsh-remote-workspaces/` (egress `call`, Remotes section).
