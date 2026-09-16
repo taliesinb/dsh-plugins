@@ -118,7 +118,16 @@ Expect one event with `"source":{"kind":"user"}` and the slug.
 ## Status
 
 - Built, typechecked, unit-tested; verified end to end on the isolated
-  preview (both the slug and the no-slug paths). Row added to
-  `cordis.dev.yml` (dev overlay). **Not** installed into the live `web`
-  profile — that is a boot-time change to the user's DSH; do it only on
-  request: `dsh plugin --profile web add ./plugins/session-title-slug`.
+  preview (slug, no-slug, and ghost-row paths).
+- **Live since 2026-09-16:** installed into the `web` profile as an
+  absolute-path row in `~/.dsh/profiles/web/cordis.patch.yml` (id
+  `tali-session-title-slug`, the house convention for these plugins — not
+  `dsh plugin add`). The profile has `patchReload: 'live'`, so the row applied
+  to the running :3080 server on save; a backup of the previous patch file was
+  left in `/tmp/cordis.patch.yml.bak-<epoch>`. The row was then REMOVED from
+  `cordis.dev.yml` (the preview composes live profile + overlay; a second row
+  with the same id fails the boot with "duplicate loader entry id").
+  `pnpm dsh web --dump-config` (with and without `--patch cordis.dev.yml`)
+  confirmed a single resolved row.
+- Rebuilding `lib/client.js` now hot-swaps the LIVE GUI (PREVIEWING.md tier 2)
+  — run `pnpm watch` only when that is intended.
