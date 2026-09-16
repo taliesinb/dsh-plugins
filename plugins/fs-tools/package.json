@@ -1,0 +1,35 @@
+{
+  "name": "tali-fs-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: batch filesystem tools beside the built-ins — list_dir (directories included), read_many (several line ranges per call, observed for the read-guard), edit_many (several literal replacements across files, validated before any write) and search (ripgrep with context, files/count modes, include/exclude globs, several roots and patterns).",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "common.mjs",
+    "list-dir.mjs",
+    "read-many.mjs",
+    "edit-many.mjs",
+    "search.mjs",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-tools": "link:/Users/tali/github/deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",
+    "@vscode/ripgrep": "link:/Users/tali/github/deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep",
+    "@deepseek-ai/dsh-llm": "link:/Users/tali/github/deepseek-harness/packages/llm/llm"
+  }
+}

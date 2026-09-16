@@ -297,6 +297,14 @@ can reproduce or maintain it:
   manifest cannot fix it (web-app scope is host-only, `window.open` never
   leaves the app) and the `foreign-link-opener` plugin that hands such links
   to real Safari via `open -a`.
+- `fs-tools-plugin.md` — batch filesystem tools beside the built-ins
+  (`fs-tools` plugin: `list_dir` with directories, `read_many` that emits
+  `fs/observed`, `edit_many` validated-before-write across files, `search` =
+  ripgrep with context/files/count/include/exclude): the corpus evidence from
+  `rsi/tool-analysis-02-validation.md` (bash mutates files 1.5× more than
+  edit+write; `edit` 19 % error rate), how the read-guard integration works
+  (`fs/edit-intent` waterfall + `fs/observed`), the headless e2e method, and
+  the Cordis `inject`/HarnessError/`oneOf`/glob-anchoring traps.
 - `import-claude-code-sessions.md` — migrating Supacode/Claude Code transcripts
   (and their project memory) into DSH sessions: why Supacode keeps no
   transcripts, the session-log frame contract, the converter tool in

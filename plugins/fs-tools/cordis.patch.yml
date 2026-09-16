@@ -1,0 +1,7 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Registers list_dir, read_many, edit_many and search beside the in-tree
+# read/edit/grep/glob tools. Override `config` in the profile's
+# cordis.patch.yml (a later layer replaces the whole value).
+- insert:
+    - id: tali-fs-tools
+      name: tali-fs-tools
