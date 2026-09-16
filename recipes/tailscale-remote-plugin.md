@@ -226,6 +226,10 @@ plugin row lives at the top of the profile patch's `insert` list; state at
 (duplicate id would fail a preview boot; the preview also could not bind
 :3083 while the live one runs).
 
+Confirmed live 2026-09-16: Enable pressed in the live GUI, phone scanned the
+QR and got the DSH GUI at `https://tali-macbook-air.tailbce956.ts.net/dsh/`.
+DSH branch pushed: `taliesinb/deepseek-harness` → `fix/tailscale-mounting`.
+
 ## Using it
 
 1. Run DSH from `fix/tailscale-mounting` (see above) with the plugin row in
