@@ -1,0 +1,46 @@
+{
+  "name": "tali-session-title-slug",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH client plugin: a leading `some-slug: ` in the very first prompt of a New Session names that session. The New Session sidebar row previews the slug live while you type.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/slug.test.ts",
+    "check": "node --check index.js",
+    "prepare": "node build.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:/Users/tali/github/deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:/Users/tali/github/deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:/Users/tali/github/deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:/Users/tali/github/deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-session": "link:/Users/tali/github/deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-slots": "link:/Users/tali/github/deepseek-harness/packages/client/ui-slots",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

@@ -1,0 +1,5 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: the slug grammar is fixed (see README).
+- insert:
+    - id: tali-session-title-slug
+      name: tali-session-title-slug

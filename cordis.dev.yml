@@ -13,8 +13,8 @@
 # tailscale-remote (2026-09-16; it also binds 127.0.0.1:3083 and owns the /dsh
 # serve route, so a preview must not load it — or must set another
 # listenPort/mountPath).
-# This overlay only adds what is NOT there: agent-status-indicator and the
-# preview-only red identity.
+# This overlay only adds what is NOT there: agent-status-indicator,
+# session-title-slug and the preview-only red identity.
 #
 # For a fully ISOLATED throwaway-home preview (see PREVIEWING.md) this file is
 # intentionally incomplete — copy the live-profile rows here for that flow.
@@ -23,6 +23,8 @@
 - insert:
     - id: tali-agent-status-indicator
       name: '/Users/tali/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
+    - id: tali-session-title-slug
+      name: '/Users/tali/github/tali-dash-plugins/plugins/session-title-slug/index.js'
     # Preview-only identity: red whale + "DSH-dev" so a Dock-installed preview
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity

@@ -324,6 +324,13 @@ can reproduce or maintain it:
   `session.v3.jsonl.zstd` stale-copy trap, the headless end-to-end test method
   against a copied home, and the first corpus-wide findings (incl. 11 sessions
   the current reader refuses).
+- `session-title-slug-plugin.md` — name a New Session at creation by starting
+  its first prompt with `some-slug: ` (`session-title-slug` plugin): the
+  survey of why the blank row's label is unreachable through data (blank
+  until `turn/start`, `single` browser slot, one-owner locale namespaces) and
+  hence a DOM preview; why the rename waits for the local `blank` flip and
+  reads the submission echo, not the draft or input phase; the
+  `SSH_TTY` trick that keeps the preview's directory picker in the browser.
 - `settings-keyboard-shortcut-plugin.md` — ⌘. toggles the web GUI Settings
   panel (`settings-shortcut` plugin): why ⌘, is impossible in Safari (the
   app consumes it before the page), the component-local open state that
