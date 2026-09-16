@@ -33,10 +33,13 @@ checkout** before relying on this file — it is a summary, the checkout is the
 truth. Recipes spell out the concrete `~`-relative paths of the machine they
 were written on; map them onto the symbols above when you are elsewhere.
 
-Absolute paths are unavoidable in two places and are fine there (local-only
-repo): `cordis.dev.yml` rows (`name:` must be an absolute module path) and the
+Absolute paths are unavoidable in two places and are tolerated there:
+`cordis.dev.yml` rows (`name:` must be an absolute module path) and the
 `link:` devDependencies each plugin uses for type-checking — regenerate both if
-the checkout or this repo moves.
+the checkout or this repo moves. The repo is **not** local-only: it is pushed
+to `origin` (https://github.com/taliesinb/dsh-plugins), so commit finished
+work and `git push`; anything machine-specific (those absolute paths, `~`
+paths in recipes) is documented as such rather than assumed.
 
 ## Permissions (deliberate — do not "fix")
 
