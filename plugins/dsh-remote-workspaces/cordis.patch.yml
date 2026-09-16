@@ -1,0 +1,7 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Defaults: egress routes under /remote/<server>/, registry in
+# $DSH_HOME/remote-workspaces.json, no seeded servers. Override `config` in the
+# profile's cordis.patch.yml (a later layer replaces the whole value).
+- insert:
+    - id: tali-remote-workspaces
+      name: dsh-remote-workspaces

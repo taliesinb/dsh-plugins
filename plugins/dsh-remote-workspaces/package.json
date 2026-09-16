@@ -1,0 +1,30 @@
+{
+  "name": "dsh-remote-workspaces",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: mirror workspaces of other DSH servers in this GUI — sessions render through a same-origin egress proxy (/remote/<server>/?embed=<session>) and are managed host-to-host over the remote's RPC. Needs the DSH branch feat/embed-session on the remote.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "egress.mjs",
+    "state.mjs",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js && node --check egress.mjs && node --check state.mjs && node --test tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery"
+  }
+}

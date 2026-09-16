@@ -1,0 +1,13 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:/Users/tali/github/deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery

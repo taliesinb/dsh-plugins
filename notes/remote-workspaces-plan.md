@@ -71,6 +71,15 @@ Learned while implementing:
 - `session.create({ request: { workspaceId, agentPreset } })` returns `{ sessionId }`;
   `session.rename({ request: { sessionId, title } })`. Both verified against the
   running host from the page.
+- `session.list` takes `{ _request: {} }` (underscore — parameter names are literal).
+  Item: `{ sessionId, updatedAt, running, blank, cwd, projections: { values: { title, goal, … } } }`;
+  `cwd` maps a session to its workspace (compare with the workspace `path`).
+- `webServer.registerUpgrade` is exact-path only; the embedded shell opens exactly one
+  socket (`…/api/remote.mux`), so one upgrade route per remote suffices. HMR
+  `plugins/events` is SSE over HTTP (prefix route) — the `compression` middleware
+  skips `text/event-stream` and already-encoded upstream bodies, so relaying
+  upstream `content-encoding` is safe.
+- Launcher flags precede app args: `dsh --profile web --patch x.yml --port N`.
 
 | Change | Where (likely) | Notes |
 |---|---|---|
@@ -263,10 +272,18 @@ memory only — irrelevant once the embed hides Settings.
    ordinary shell's localStorage untouched. zh README pairs not yet translated.
    Live GUI still runs `fix/tailscale-mounting`; switch when convenient
    (`git checkout feat/embed-session` in the live checkout after stopping it, rebuild).
-2. **Egress proxy**: `/remote/<id>/` HTTP+WS with auth bridge, hard-coded one server
-   in `cordis.dev.yml`; verify the iframe URL renders a remote session end-to-end
-   over the tailnet (curl checklist like the ingress recipe: index, assets, `api/…`,
-   `plugins/events`, `wss` mux).
+2. **Egress proxy** — **DONE 2026-09-16**: `plugins/dsh-remote-workspaces/`
+   (`index.js`, `egress.mjs`, `state.mjs`, 9 node:test cases). Per server: prefix
+   route `/remote/<id>` + exact upgrade route `/remote/<id>/api/remote.mux` on
+   `ctx.webServer`, both gated by `ctx.connection.requestRejection`. Auth bridge =
+   tailnet identity or token→cookie (re-exchange on 401 / 6 h). Control channel
+   `/remote-workspaces` with `status`, `probe`. Verified with two worktree instances
+   (remote :3082, local :3081 seeded via `--patch`): host-to-host `session.list`
+   works; the remote session renders in a same-origin iframe of the local GUI and
+   runs a live streamed turn (WS mux through the egress); all 30 embedded-shell
+   resources stayed under `/remote/rv/`; local GUI localStorage untouched.
+   Not yet exercised: a real `dsh-tailscale-remote` upstream over HTTPS (identity
+   mode + its slash-guard script) — first thing to try in phase 3 with a real peer.
 3. **Registry + control channel + sidebar rows** (wrap approach), manual add via
    settings JSON first, then the modal.
 4. **Iframe pool + selection**; new-session flow with draft store; rename/archive.
