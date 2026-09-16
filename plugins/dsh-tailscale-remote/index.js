@@ -1,0 +1,221 @@
+/**
+ * dsh-tailscale-remote — drive this DSH Web GUI from another device on the
+ * tailnet, at `https://<node>.<tailnet>.ts.net/dsh/`.
+ *
+ * One feature, deliberately: an authenticating loopback reverse proxy
+ * (proxy.mjs) published by `tailscale serve` on a path mount (tailscale.mjs),
+ * with a "Tailscale remote" settings section (src/client) offering Enable /
+ * Disable, the URL with copy-to-clipboard, a comma-separated allowlist of
+ * tailnet logins that may enter without a token, and a QR code that carries
+ * the standing token so any device that scans it is let in.
+ *
+ * Requires the DSH branch `fix/tailscale-mounting` (document-relative Host
+ * URLs); on stock DSH the shell's `/api`, `/plugins` and WebSocket URLs escape
+ * the `/dsh` mount and 404.
+ *
+ * Node half only here; the browser half is `./client` (lib/client.js). Config:
+ *   listenHost   loopback address of the proxy                     127.0.0.1
+ *   listenPort   proxy port that tailscale serve points at        3083
+ *   mountPath    path mount on the node                           /dsh
+ *   servePort    HTTPS port on the node                           443
+ *   tailscalePath  CLI path override ('' = PATH / app bundle)     ''
+ *   stateFile    persisted intent + token ('' = $DSH_HOME/tailscale-remote.json)
+ *   cookieName   the proxy's own session cookie                   dsh-tailscale-remote
+ */
+import Schema from '@deepseek-ai/schemastery'
+import { renderSVG } from 'uqr'
+import { startProxy } from './proxy.mjs'
+import { defaultStateFile, generateToken, loadState, parseUserList, saveState } from './state.mjs'
+import { createTailscaleManager, normalizeMountPath } from './tailscale.mjs'
+
+export const name = 'tailscale-remote'
+export const inject = ['webServer', 'connection']
+
+export const Config = Schema.object({
+  listenHost: Schema.string().default('127.0.0.1'),
+  listenPort: Schema.natural().max(65535).default(3083),
+  mountPath: Schema.string().default('/dsh'),
+  servePort: Schema.natural().min(1).max(65535).default(443),
+  tailscalePath: Schema.string().default(''),
+  stateFile: Schema.string().default(''),
+  cookieName: Schema.string().default('dsh-tailscale-remote'),
+})
+
+/** RPC channel the browser half calls (`POST /tailscale-remote/<endpoint>`); the proxy refuses to forward it. */
+export const CONTROL_CHANNEL = '/tailscale-remote'
+
+const TOKEN_QUERY = 'token'
+
+function qrSvg(text) {
+  try {
+    return renderSVG(text, { ecc: 'M', border: 2 })
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * @param {import('@deepseek-ai/cordis').Context} ctx
+ * @param {ReturnType<typeof Config>} config
+ */
+export function apply(ctx, config) {
+  const stateFile = config.stateFile || defaultStateFile()
+  const mountPath = normalizeMountPath(config.mountPath)
+  const log = message => ctx.logger.info(message)
+  const warn = message => ctx.logger.warn(message)
+
+  /** @type {{ version: number, enabled: boolean, allowedUsers: string[], token: string }} */
+  let state
+  /** @type {Awaited<ReturnType<typeof startProxy>> | undefined} */
+  let proxy
+  let disposed = false
+  /** Serialize enable/disable/rotate so two panel clicks cannot interleave CLI calls. */
+  let chain = Promise.resolve()
+  const exclusive = fn => {
+    const next = chain.then(fn, fn)
+    chain = next.catch(() => {})
+    return next
+  }
+
+  const tailscale = createTailscaleManager({
+    configuredPath: config.tailscalePath,
+    port: config.servePort,
+    mountPath,
+    target: () => proxy?.url ?? '',
+    log,
+  })
+
+  const persist = () => saveState(stateFile, state)
+
+  const ensureProxy = async () => {
+    if (proxy !== undefined) return proxy
+    proxy = await startProxy({
+      listenHost: config.listenHost,
+      listenPort: config.listenPort,
+      backendHost: '127.0.0.1',
+      backendPort: ctx.webServer.port,
+      connection: ctx.connection,
+      token: () => state.token,
+      allowedUsers: () => state.allowedUsers,
+      cookieName: config.cookieName,
+      controlPrefix: CONTROL_CHANNEL,
+      mountPath,
+      log,
+      warn,
+    })
+    log(`tailscale-remote: proxy ${proxy.url} -> http://127.0.0.1:${String(ctx.webServer.port)}`)
+    return proxy
+  }
+
+  const stopProxy = async () => {
+    const current = proxy
+    proxy = undefined
+    if (current !== undefined) await current.close()
+  }
+
+  const snapshot = async () => {
+    const route = await tailscale.status()
+    const url = route.url
+    const tokenUrl = url === undefined ? undefined : `${url}?${TOKEN_QUERY}=${encodeURIComponent(state.token)}`
+    return {
+      enabled: state.enabled,
+      proxyRunning: proxy !== undefined,
+      proxyUrl: proxy?.url,
+      route: route.state,
+      detail: route.detail,
+      dnsName: route.dnsName,
+      mappedTarget: route.mappedTarget,
+      url,
+      tokenUrl,
+      qrSvg: tokenUrl === undefined ? undefined : qrSvg(tokenUrl),
+      allowedUsers: state.allowedUsers,
+      mountPath,
+      servePort: config.servePort,
+    }
+  }
+
+  const ok = value => ({ ok: true, value })
+  const fail = (code, message, details = {}) => ({ ok: false, error: { code: `tailscale-remote/${code}`, message, details } })
+
+  const enable = () => exclusive(async () => {
+    if (disposed) return fail('disposed', 'plugin is unloading')
+    try {
+      await ensureProxy()
+    } catch (error) {
+      return fail('proxy', `could not start the proxy on ${config.listenHost}:${String(config.listenPort)}: ${String(error?.message ?? error)}`)
+    }
+    const outcome = await tailscale.enable()
+    if (outcome !== 'ok') {
+      await stopProxy()
+      const route = await tailscale.status()
+      const reasons = {
+        'unavailable': `Tailscale is not available (${route.detail ?? 'unknown'}): is the Tailscale app running and logged in?`,
+        'conflict': `${mountPath} on this node is already mapped to ${route.mappedTarget ?? 'another service'}`,
+        'failed': 'tailscale serve failed — see the DSH log',
+        'verify-failed': 'tailscale serve returned success but the route did not appear',
+      }
+      return fail(outcome, reasons[outcome] ?? outcome, { route })
+    }
+    state.enabled = true
+    await persist()
+    return ok(await snapshot())
+  })
+
+  const disable = () => exclusive(async () => {
+    const outcome = await tailscale.disable()
+    if (outcome === 'failed') return fail('failed', 'tailscale serve off failed — see the DSH log')
+    await stopProxy()
+    state.enabled = false
+    await persist()
+    return ok(await snapshot())
+  })
+
+  const setUsers = value => exclusive(async () => {
+    state.allowedUsers = parseUserList(value)
+    await persist()
+    return ok(await snapshot())
+  })
+
+  const rotateToken = () => exclusive(async () => {
+    state.token = generateToken()
+    await persist()
+    return ok(await snapshot())
+  })
+
+  // ---- control channel (never forwarded by the proxy) --------------------
+  ctx.connection.rpc.handle(CONTROL_CHANNEL, async (endpoint, payload) => {
+    await boot
+    const args = typeof payload === 'object' && payload !== null && typeof payload.args === 'object' && payload.args !== null ? payload.args : {}
+    switch (endpoint) {
+      case 'status': return ok(await snapshot())
+      case 'enable': return enable()
+      case 'disable': return disable()
+      case 'set-users': return setUsers(args.allowedUsers)
+      case 'rotate-token': return rotateToken()
+      default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
+    }
+  })
+
+  // ---- boot: restore persisted intent -----------------------------------
+  const boot = (async () => {
+    state = await loadState(stateFile)
+    if (!state.enabled || disposed) return
+    try {
+      await ensureProxy()
+      const route = await tailscale.status()
+      if (route.state !== 'active') {
+        const outcome = await tailscale.enable()
+        if (outcome !== 'ok') warn(`tailscale-remote: persisted route could not be republished (${outcome}); the proxy stays up on ${proxy?.url ?? ''}`)
+      }
+    } catch (error) {
+      warn(`tailscale-remote: persisted start skipped: ${String(error?.message ?? error)}`)
+    }
+  })()
+
+  ctx.effect(() => () => {
+    disposed = true
+    // The tailscale route is intent that survives DSH restarts (tailscaled
+    // persists it); only the loopback listener belongs to this process.
+    return boot.then(() => chain).then(stopProxy)
+  }, 'tailscale-remote: proxy listener')
+}

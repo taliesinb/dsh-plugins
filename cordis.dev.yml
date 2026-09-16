@@ -26,3 +26,9 @@
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity
       name: '/Users/tali/github/tali-dash-plugins/plugins/preview-identity/index.js'
+    # Tailscale remote: DSH at https://<node>/dsh/ behind an authenticating
+    # loopback proxy (127.0.0.1:3083). Needs DSH branch fix/tailscale-mounting.
+    # Disabled until Enable is pressed in Settings → Tailscale remote; if the
+    # live profile also runs it, give one of them another listenPort.
+    - id: tali-tailscale-remote
+      name: '/Users/tali/github/tali-dash-plugins/plugins/dsh-tailscale-remote/index.js'

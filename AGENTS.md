@@ -318,6 +318,12 @@ can reproduce or maintain it:
   app consumes it before the page), the component-local open state that
   forces DOM clicks on `[hash]_[local]` class selectors, and how to test a
   chord with a real System Events keystroke instead of a synthetic one.
+- `tailscale-remote-plugin.md` — the DSH GUI at `https://<node>/dsh/` over the
+  tailnet: the from-scratch `dsh-tailscale-remote` plugin (loopback proxy +
+  `tailscale serve --set-path /dsh` + "Tailscale remote" settings section with
+  Enable/Disable, URL, allowed-user list, tokened QR), the DSH branch
+  `fix/tailscale-mounting` (document-relative Host URLs; why a worktree), the
+  measured Tailscale path-strip facts, and the trailing-slash trap.
 - `wolfram-kernel-supervisor.md` — per-chat Wolfram/Mathematica kernels
   (`wolfram-kernel-supervisor` plugin): the Pi `wolfram_Show`/rho archaeology,
   why the paclet fork's Show tool is obsolete, `wolfram_show`'s user-only image

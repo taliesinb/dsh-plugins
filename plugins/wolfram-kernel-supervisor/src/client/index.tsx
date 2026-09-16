@@ -142,9 +142,12 @@ function stateOf(block: Block): RowState {
 
 // ---------------------------------------------------------------- image loading
 
-/** Same-origin URL of the plugin's own image route (host: index.js SHOWN_IMAGE_PATH). The browser sends the auth cookie. */
+/**
+ * Same-origin URL of the plugin's own image route (host: index.js SHOWN_IMAGE_PATH). The browser sends the auth cookie.
+ * Document-relative (`./api/...`): behind a path-mounting proxy (dsh-tailscale-remote at `/dsh/`) `/api` would escape the mount.
+ */
 function shownImageUrl(sessionId: string, image: ImageRef): string {
-  return `/api/wolfram/shown?sessionId=${encodeURIComponent(sessionId)}&attachmentId=${encodeURIComponent(image.attachmentId)}`
+  return `./api/wolfram/shown?sessionId=${encodeURIComponent(sessionId)}&attachmentId=${encodeURIComponent(image.attachmentId)}`
 }
 
 /**
@@ -228,7 +231,7 @@ function useFrameColor(): { color: string | undefined, onLoad: (event: { current
 
 /** Reveal a plugin-written PNG in the system viewer through the host's open route (paths under showDirectory only). */
 function openShown(path: string): void {
-  void fetch(`/api/wolfram/open?path=${encodeURIComponent(path)}`, { credentials: 'same-origin' })
+  void fetch(`./api/wolfram/open?path=${encodeURIComponent(path)}`, { credentials: 'same-origin' })
 }
 
 /** Caption: the label (or the expression head) styled as a link; tooltip = path; click opens the PNG in the system viewer. */
@@ -322,7 +325,7 @@ function Label({ tree, text }: { tree: LabelTree | null | undefined, text: strin
 // ---------------------------------------------------------------- Manipulate widget
 
 function manipulateUrl(sessionId: string, kernelId: string, id: string, values: ControlValue[]): string {
-  return `/api/wolfram/manipulate?sessionId=${encodeURIComponent(sessionId)}&kernelId=${encodeURIComponent(kernelId)}&id=${encodeURIComponent(id)}&values=${encodeURIComponent(JSON.stringify(values))}`
+  return `./api/wolfram/manipulate?sessionId=${encodeURIComponent(sessionId)}&kernelId=${encodeURIComponent(kernelId)}&id=${encodeURIComponent(id)}&values=${encodeURIComponent(JSON.stringify(values))}`
 }
 
 const CONTROLS_STYLE: CSSProperties = { display: 'grid', gridTemplateColumns: 'max-content minmax(140px, 260px) max-content', gap: '6px 10px', alignItems: 'center', fontSize: 12, padding: '4px 2px' }

@@ -26,8 +26,10 @@
 import type { Context } from '@deepseek-ai/cordis'
 
 /** Mirrors index.js. */
-const CONFIG_PATH = '/api/foreign-links/config'
-const OPEN_PATH = '/api/foreign-links/open'
+// Document-relative (`./api/...`), not root-relative: behind a path-mounting
+// proxy (dsh-tailscale-remote at `/dsh/`) `/api` would escape the mount.
+const CONFIG_PATH = './api/foreign-links/config'
+const OPEN_PATH = './api/foreign-links/open'
 const REQUEST_HEADER = 'x-dsh-foreign-links'
 
 interface ClientConfig {
