@@ -55,7 +55,22 @@ land on the egress proxy. Two consequences to honour:
 
 ### 3.1 Fork patch (branch off `fix/tailscale-mounting`, e.g. `feat/embed-session`)
 
-Small and self-contained; candidate for upstream later.
+Small and self-contained; candidate for upstream later. **Implemented — see §7.**
+Learned while implementing:
+
+- The GUI persists its selection and drafts in `localStorage` (`dsh.sessions.current`
+  via `dsh-client-store` `persist`). Because the egress proxy serves the remote page
+  from the local origin, the embedded shell and the local GUI share `localStorage`.
+  Fix: the store engine namespaces every persisted key with `embed:<sessionId>:` in
+  embed mode (`setEmbedPresentation`, called by the web boot kernel before plugins).
+- Remote unary endpoints are `POST /api/<namespace>/<method>` with the Connection
+  envelope `{ type: 'client-request', rpcId, method: '<ns>/<method>', payload: { args } }`
+  where `args` keys are the method's *parameter names* (e.g. `{ request: {...} }`
+  for `workspace.create`, `{}` for `agentPresets.list`). Response:
+  `{ type: 'server-response', rpcId, result: { ok, value | error } }`.
+- `session.create({ request: { workspaceId, agentPreset } })` returns `{ sessionId }`;
+  `session.rename({ request: { sessionId, title } })`. Both verified against the
+  running host from the page.
 
 | Change | Where (likely) | Notes |
 |---|---|---|
@@ -238,8 +253,16 @@ memory only — irrelevant once the embed hides Settings.
 
 ## 7. Phases
 
-1. **Spike (fork)**: `?embed=` chrome-less mode + query-preserving redirect. Verify by
-   opening `http://127.0.0.1:3080/?embed=<id>` locally.
+1. **Spike (fork)** — **DONE 2026-09-16**, commit `aa123a8fdf` on branch
+   `feat/embed-session` (worktree `~/github/deepseek-harness-embed`, off
+   `fix/tailscale-mounting`). `?embed=<sessionId>` renders one Session chrome-less;
+   persisted browser state is namespaced `embed:<id>:` (shared-origin hazard found
+   during implementation — see §3.1 notes); the Session Controller client pins the
+   selection; the token redirect keeps the query. Verified on a throwaway home
+   (`DSH_HOME=/tmp/dsh-embed-home`, port 3082): prompt round-trip, reload pinned,
+   ordinary shell's localStorage untouched. zh README pairs not yet translated.
+   Live GUI still runs `fix/tailscale-mounting`; switch when convenient
+   (`git checkout feat/embed-session` in the live checkout after stopping it, rebuild).
 2. **Egress proxy**: `/remote/<id>/` HTTP+WS with auth bridge, hard-coded one server
    in `cordis.dev.yml`; verify the iframe URL renders a remote session end-to-end
    over the tailnet (curl checklist like the ingress recipe: index, assets, `api/…`,
