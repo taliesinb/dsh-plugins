@@ -273,7 +273,7 @@ function Hint({ text, children, style, mono, copyText }: { text: string; childre
   }, [anchor, text])
   const trimmed = text.trim()
   const copy = async () => {
-    const ok = await writeClipboard(copyText ?? trimmed)
+    const ok = await writeClipboard(copyText ?? trimmed.replace(/`/g, ''))
     setCopied(ok)
     setTimeout(() => setCopied(false), 1200)
   }
@@ -302,12 +302,27 @@ function Hint({ text, children, style, mono, copyText }: { text: string; childre
             boxShadow: '0 8px 28px rgba(0,0,0,.28), 0 1px 3px rgba(0,0,0,.2)', pointerEvents: 'none',
           }}
         >
-          {trimmed}
+          {mono ? trimmed : renderInlineCode(trimmed)}
           <div style={{ marginTop: 6, font: '11px/14px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-tertiary)' }}>{copied ? 'Copied' : 'Click to copy'}</div>
         </div>
       )}
     </span>
   )
+}
+
+/** Wrap path-, URL-, port- and identifier-looking tokens of a plain detail line in backticks. */
+function codeifyTechnical(line: string): string {
+  if (line.includes('`')) return line
+  return line.replace(/(\/[^\s,)]+|https?:\/\/[^\s,)]+|\b\d{1,3}(?:\.\d{1,3}){3}:\d+\b|\b[a-z]+(?:\.[a-z0-9-]+){2,}\b|\$[A-Z_]+(?: \S+)?)/g, '`$1`')
+}
+
+/** `code` spans (backticks) in card text render monospace; everything else inherits. */
+function renderInlineCode(text: string): ReactNode {
+  const parts = text.split(/(`[^`]+`)/)
+  if (parts.length === 1) return text
+  return parts.map((part, index) => part.startsWith('`') && part.endsWith('`')
+    ? <code key={index} style={{ font: '11px/16px ui-monospace, SFMono-Regular, Menlo, monospace', color: 'var(--dsw-alias-label-primary)', overflowWrap: 'anywhere' }}>{part.slice(1, -1)}</code>
+    : part)
 }
 
 /**
@@ -439,7 +454,7 @@ export function ServerSection({ api }: SectionProps) {
                 <td style={table.td}>
                   <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
                   {process.title}
-                  <Info lines={process.details} gap="line" />
+                  <Info lines={process.details.map(codeifyTechnical)} gap="line" />
                 </td>
                 <td style={{ ...table.td, ...styles.mono }}>
                   {process.pid ?? '—'}
@@ -508,7 +523,7 @@ export function ServerSection({ api }: SectionProps) {
             {status.clients.map(client => (
               <tr key={client.key}>
                 <td style={table.td}>
-                  <Hint text={`${client.login ?? client.admitted}${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
+                  <Hint text={`\`${client.login ?? client.admitted}\`${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
                     {client.login === undefined
                       ? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>
                       : client.login.replace(/@.*$/, '')}
@@ -516,12 +531,12 @@ export function ServerSection({ api }: SectionProps) {
                   </Hint>
                 </td>
                 <td style={{ ...table.td, ...styles.mono, fontSize: 11, letterSpacing: '-0.03em', overflow: 'visible', textOverflow: 'clip' }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
-                <td style={table.td}><Hint text={client.userAgent}>{client.agent === '—' ? <span style={table.muted}>—</span> : client.agent}</Hint></td>
+                <td style={table.td}><Hint text={client.userAgent === '' ? '' : `\`${client.userAgent}\``}>{client.agent === '—' ? <span style={table.muted}>—</span> : client.agent}</Hint></td>
                 <td style={table.td} title="open GUI WebSockets">{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
                 <td style={table.td}>{client.requests}</td>
                 <td style={table.td}>{ago(status.now - client.lastSeen)}</td>
                 <td style={table.td}>
-                  <Hint text={client.lastSession === undefined ? (client.lastPath ?? '') : `${client.lastSession.workspace ?? client.lastSession.cwd ?? ''}\n${client.lastSession.sessionId ?? ''}\n${client.lastSession.method}`}>
+                  <Hint text={client.lastSession === undefined ? (client.lastPath === undefined ? '' : `\`${client.lastPath}\``) : `\`${client.lastSession.workspace ?? client.lastSession.cwd ?? ''}\`\n\`${client.lastSession.sessionId ?? ''}\`\n\`${client.lastSession.method}\``}>
                     {client.lastSession === undefined
                       ? <span style={table.muted}>—</span>
                       : (
@@ -576,11 +591,11 @@ function describeDockApp(dock: DockAppStatus, url: string | undefined): { color:
 
 function describeRelay(relay: RelayStatus, enabled: boolean): { color: string; text: string } {
   if (!relay.supported) return { color: 'var(--dsw-alias-label-tertiary)', text: 'Relay: macOS only' }
-  if (relay.loaded && relay.listening) return { color: '#3ba55c', text: `Relay running (pid ${String(relay.pid ?? '?')}) on ${relay.spec.listen}` }
-  if (relay.loaded) return { color: '#e5a50a', text: `Relay LaunchAgent loaded but ${relay.spec.listen} is not answering — see ${relay.logDir ?? ''}/relay.log` }
-  if (relay.listening) return { color: '#e5a50a', text: `Something else listens on ${relay.spec.listen} (an older proxy config?) — the relay is not installed` }
+  if (relay.loaded && relay.listening) return { color: '#3ba55c', text: `Relay running (pid ${String(relay.pid ?? '?')}) on \`${relay.spec.listen}\`` }
+  if (relay.loaded) return { color: '#e5a50a', text: `Relay LaunchAgent loaded but \`${relay.spec.listen}\` is not answering — see \`${relay.logDir ?? ''}/relay.log\`` }
+  if (relay.listening) return { color: '#e5a50a', text: `Something else listens on \`${relay.spec.listen}\` (an older proxy config?) — the relay is not installed` }
   if (relay.installed) return { color: '#e5a50a', text: 'Relay LaunchAgent written but not loaded' }
-  return { color: enabled ? '#e5a50a' : 'var(--dsw-alias-label-tertiary)', text: enabled ? `Relay not installed: tailscale serve targets ${relay.spec.listen} but nothing answers there` : 'Relay not installed' }
+  return { color: enabled ? '#e5a50a' : 'var(--dsw-alias-label-tertiary)', text: enabled ? `Relay not installed: \`tailscale serve\` targets \`${relay.spec.listen}\` but nothing answers there` : 'Relay not installed' }
 }
 
 function describeRoute(status: RemoteStatus): { color: string; text: string } {
@@ -667,7 +682,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
           Services{status.instance ? ` — ${status.instance} instance` : ''}
           <Info lines={status.selfLogin === undefined
             ? ['This node has no Tailscale user (tagged device): its own requests carry no identity, so the macOS app would need the QR token.']
-            : [`Requests this Mac makes to ${status.url ?? 'the tailnet address'} are signed in by Tailscale itself as ${status.selfLogin} — no token, no cookie, nothing to expire.`, 'That is how the macOS app and Safari on this Mac get in.']} />
+            : [`Requests this Mac makes to \`${status.url ?? 'the tailnet address'}\` are signed in by Tailscale itself as \`${status.selfLogin}\` — no token, no cookie, nothing to expire.`, 'That is how the macOS app and Safari on this Mac get in.']} />
         </div>
         <div style={styles.row}>
           <div style={{ ...styles.sub, flex: 1 }}>
@@ -679,7 +694,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                     : status.enabled ? 'enabled, route off' : 'not installed'}
             <Info lines={[
               route.text,
-              `Publishes this DSH on your tailnet with tailscale serve at ${status.mountPath} (HTTPS, port ${String(status.servePort)}), behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on ${status.proxyUrl}`}.`,
+              `Publishes this DSH on your tailnet with \`tailscale serve\` at \`${status.mountPath}\` (HTTPS, port ${String(status.servePort)}), behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on \`${status.proxyUrl}\``}.`,
               'Only devices on the tailnet can reach it.',
             ]} />
           </div>
@@ -709,9 +724,9 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                 <Info lines={[
                   described.text,
                   '',
-                  `LaunchAgent ${relay.label ?? ''}: always answers ${relay.spec.listen} (what tailscale serve targets) and relays to the proxy on ${relay.spec.backend}.`,
-                  `When DSH is down it runs “${relay.spec.start}” in ${relay.spec.cwd} and shows a “Starting DSH…” page until it answers.`,
-                  `Logs: ${relay.spec.logDir}`,
+                  `LaunchAgent \`${relay.label ?? ''}\`: always answers \`${relay.spec.listen}\` (what \`tailscale serve\` targets) and relays to the proxy on \`${relay.spec.backend}\`.`,
+                  `When DSH is down it runs \`${relay.spec.start}\` in \`${relay.spec.cwd}\` and shows a “Starting DSH…” page until it answers.`,
+                  `Logs: \`${relay.spec.logDir}\``,
                   'Restart or stop it from the Server pane.',
                 ]} />
               </div>
@@ -739,14 +754,14 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                 <span style={styles.dot(dock.color)} />
                 macOS app: {state}
                 <Info lines={[
-                  dockApp.path,
-                  `opens ${status.url ?? '(tailnet address unknown)'}`,
-                  `falls back to ${dockApp.fallbackUrl} + token when Tailscale is off`,
-                  dockApp.kind === 'wrapper' && !dockApp.current ? `currently points at ${dockApp.url ?? '?'} — reinstall` : '',
-                  dockApp.kind === 'safari-webapp' ? `currently a Safari web app for ${dockApp.url ?? '?'} (30-day cookie it cannot renew)` : '',
+                  `\`${dockApp.path}\``,
+                  `opens \`${status.url ?? '(tailnet address unknown)'}\``,
+                  `falls back to \`${dockApp.fallbackUrl}\` + token when Tailscale is off`,
+                  dockApp.kind === 'wrapper' && !dockApp.current ? `currently points at \`${dockApp.url ?? '?'}\` — reinstall` : '',
+                  dockApp.kind === 'safari-webapp' ? `currently a Safari web app for \`${dockApp.url ?? '?'}\` (30-day cookie it cannot renew)` : '',
                   dockApp.kind === 'other' ? 'something else sits at that path: change dockAppName or remove it' : '',
                   '',
-                  `A small native WKWebView app — no Safari, no permissions. Links leaving DSH open in your browser. Built with swiftc, a few seconds the first time${dockApp.toolchain ? '' : ' (install the Xcode Command Line Tools first)'}.`,
+                  `A small native WKWebView app — no Safari, no permissions. Links leaving DSH open in your browser. Built with \`swiftc\`, a few seconds the first time${dockApp.toolchain ? '' : ' (install the Xcode Command Line Tools first)'}.`,
                   'Quit or relaunch it from the Server pane.',
                 ]} />
               </div>
@@ -779,9 +794,9 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           Allowed Tailscale users
           <Info lines={[
-            'Comma-separated tailnet logins, as shown by tailscale whois.',
+            'Comma-separated tailnet logins, as shown by `tailscale whois`.',
             'A device whose verified Tailscale login is listed enters without a token; anyone else needs the QR code below.',
-            status.selfLogin === undefined ? '' : `Your own login (${status.selfLogin}) is always allowed, listed or not.`,
+            status.selfLogin === undefined ? '' : `Your own login (\`${status.selfLogin}\`) is always allowed, listed or not.`,
           ]} />
         </div>
         <div style={{ ...styles.row, flexWrap: 'nowrap' }}>
