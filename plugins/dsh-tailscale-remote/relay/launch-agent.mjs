@@ -24,6 +24,10 @@ import { isListening } from './relay.mjs'
 
 const execFileAsync = promisify(execFile)
 export const LABEL = 'io.github.taliesinb.dsh-web-relay'
+/** Label of one instance: the base label, or `<base>.<instance>` (a preview relay beside the live one). */
+export function labelFor(instance = '') {
+  return instance === '' ? LABEL : `${LABEL}.${instance}`
+}
 const RELAY_SCRIPT = fileURLToPath(new URL('./relay.mjs', import.meta.url))
 
 export function dshHome() {
@@ -34,8 +38,8 @@ export function defaultLogDir() {
   return join(dshHome(), 'logs')
 }
 
-export function plistPath() {
-  return join(homedir(), 'Library', 'LaunchAgents', `${LABEL}.plist`)
+export function plistPath(instance = '') {
+  return join(homedir(), 'Library', 'LaunchAgents', `${labelFor(instance)}.plist`)
 }
 
 /** Where the named Node symlink lives. */
@@ -43,8 +47,13 @@ export function supportDir() {
   return join(homedir(), 'Library', 'Application Support', 'dsh-tailscale-remote')
 }
 
-export function relayExecutable() {
-  return join(supportDir(), 'dsh-web-relay')
+export function relayExecutable(instance = '') {
+  return join(supportDir(), instance === '' ? 'dsh-web-relay' : `dsh-web-relay-${instance}`)
+}
+
+/** Log file basenames of one instance (`relay.log` / `relay-preview.log`, same for `dsh-web`). */
+export function logFile(logDir, stem, instance = '') {
+  return join(logDir, instance === '' ? `${stem}.log` : `${stem}-${instance}.log`)
 }
 
 function domain() {
@@ -61,20 +70,21 @@ function xml(value) {
 }
 
 /**
- * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, executable?: string, path?: string }} spec
- *   `listen`/`backend`/`dsh` are `host:port`; `start` is the shell command that runs DSH in `cwd`.
+ * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, instance?: string, executable?: string, path?: string }} spec
+ *   `listen`/`backend`/`dsh` are `host:port`; `start` is the shell command that runs DSH in `cwd`;
+ *   `instance` ('' = the main one) keeps a preview relay's label, symlink and logs apart.
  * @returns {string[]} ProgramArguments
  */
 export function relayArguments(spec) {
   return [
-    spec.executable ?? relayExecutable(),
+    spec.executable ?? relayExecutable(spec.instance ?? ''),
     RELAY_SCRIPT,
     '--listen', spec.listen,
     '--backend', spec.backend,
     '--dsh', spec.dsh,
     '--cwd', spec.cwd,
     '--start', spec.start,
-    '--log', join(spec.logDir, 'dsh-web.log'),
+    '--log', logFile(spec.logDir, 'dsh-web', spec.instance ?? ''),
   ]
 }
 
@@ -89,7 +99,7 @@ export function launchAgentPlist(spec) {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${LABEL}</string>
+  <string>${labelFor(spec.instance ?? '')}</string>
   <key>ProgramArguments</key>
   <array>
 ${relayArguments(spec).map(arg => `    <string>${xml(arg)}</string>`).join('\n')}
@@ -101,9 +111,9 @@ ${relayArguments(spec).map(arg => `    <string>${xml(arg)}</string>`).join('\n')
   <key>ProcessType</key>
   <string>Interactive</string>
   <key>StandardOutPath</key>
-  <string>${xml(join(spec.logDir, 'relay.log'))}</string>
+  <string>${xml(logFile(spec.logDir, 'relay', spec.instance ?? ''))}</string>
   <key>StandardErrorPath</key>
-  <string>${xml(join(spec.logDir, 'relay.log'))}</string>
+  <string>${xml(logFile(spec.logDir, 'relay', spec.instance ?? ''))}</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>DSH_HOME</key>
@@ -126,12 +136,14 @@ async function launchctl(args) {
 }
 
 /**
- * @param {{ listenPort: number }} options
- * @returns {Promise<{ supported: boolean, installed: boolean, loaded: boolean, pid?: number, listening: boolean, plist: string, logDir?: string, command?: string }>}
+ * @param {{ listenPort: number, instance?: string }} options
+ * @returns {Promise<{ supported: boolean, installed: boolean, loaded: boolean, pid?: number, listening: boolean, plist: string, label: string, logDir?: string, command?: string }>}
  */
 export async function relayStatus(options) {
-  const plist = plistPath()
-  if (process.platform !== 'darwin') return { supported: false, installed: false, loaded: false, listening: false, plist }
+  const instance = options.instance ?? ''
+  const label = labelFor(instance)
+  const plist = plistPath(instance)
+  if (process.platform !== 'darwin') return { supported: false, installed: false, loaded: false, listening: false, plist, label }
   let installed = false
   let command
   try {
@@ -143,11 +155,11 @@ export async function relayStatus(options) {
   } catch {
     installed = false
   }
-  const print = await launchctl(['print', `${domain()}/${LABEL}`])
+  const print = await launchctl(['print', `${domain()}/${label}`])
   const loaded = print.code === 0
   const pid = loaded ? Number(/^\s*pid = (\d+)/m.exec(print.stdout)?.[1]) : undefined
   const listening = await isListening({ host: '127.0.0.1', port: options.listenPort }, 500)
-  return { supported: true, installed, loaded, pid: Number.isFinite(pid) ? pid : undefined, listening, plist, logDir: defaultLogDir(), command }
+  return { supported: true, installed, loaded, pid: Number.isFinite(pid) ? pid : undefined, listening, plist, label, logDir: defaultLogDir(), command }
 }
 
 /**
@@ -157,13 +169,16 @@ export async function relayStatus(options) {
 export async function installRelayAgent(spec) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
   const log = spec.log ?? (() => {})
+  const instance = spec.instance ?? ''
+  const label = labelFor(instance)
+  const plist = plistPath(instance)
   await mkdir(spec.logDir, { recursive: true })
-  await mkdir(dirname(plistPath()), { recursive: true })
+  await mkdir(dirname(plist), { recursive: true })
   // Named symlink to the Node that is installing (Login Items shows "dsh-web-relay").
   await mkdir(supportDir(), { recursive: true })
-  await rm(relayExecutable(), { force: true })
-  await symlink(process.execPath, relayExecutable())
-  const target = `${domain()}/${LABEL}`
+  await rm(relayExecutable(instance), { force: true })
+  await symlink(process.execPath, relayExecutable(instance))
+  const target = `${domain()}/${label}`
   const wasLoaded = (await launchctl(['print', target])).code === 0
   if (wasLoaded) {
     // bootout returns before the service is gone; bootstrapping into a label
@@ -174,14 +189,14 @@ export async function installRelayAgent(spec) {
       await new Promise(resolve => setTimeout(resolve, 200))
     }
   }
-  await writeFile(plistPath(), launchAgentPlist(spec))
-  let boot = await launchctl(['bootstrap', domain(), plistPath()])
+  await writeFile(plist, launchAgentPlist(spec))
+  let boot = await launchctl(['bootstrap', domain(), plist])
   for (let attempt = 0; boot.code !== 0 && attempt < 10; attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 500))
-    boot = await launchctl(['bootstrap', domain(), plistPath()])
+    boot = await launchctl(['bootstrap', domain(), plist])
   }
   if (boot.code !== 0) throw new Error(`launchctl bootstrap failed (${String(boot.code)}): ${boot.stderr.trim()}`)
-  log(`relay: LaunchAgent ${LABEL} ${wasLoaded ? 'reloaded' : 'installed'} (${plistPath()})`)
+  log(`relay: LaunchAgent ${label} ${wasLoaded ? 'reloaded' : 'installed'} (${plist})`)
   const port = Number(spec.listen.split(':').pop())
   const deadline = Date.now() + 8000
   while (Date.now() < deadline) {
@@ -191,23 +206,25 @@ export async function installRelayAgent(spec) {
   return { listening: false }
 }
 
-export async function uninstallRelayAgent({ log = () => {} } = {}) {
+export async function uninstallRelayAgent({ instance = '', log = () => {} } = {}) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
-  await launchctl(['bootout', `${domain()}/${LABEL}`])
+  const label = labelFor(instance)
+  await launchctl(['bootout', `${domain()}/${label}`])
   let removed = false
   try {
-    await stat(plistPath())
-    await rm(plistPath())
+    await stat(plistPath(instance))
+    await rm(plistPath(instance))
     removed = true
   } catch {
     removed = false
   }
-  log(`relay: LaunchAgent ${LABEL} removed`)
+  await rm(relayExecutable(instance), { force: true })
+  log(`relay: LaunchAgent ${label} removed`)
   return { removed }
 }
 
 /** Restart the relay (and with it the DSH it spawned, which the relay stops on SIGTERM). */
-export async function restartRelayAgent() {
-  const result = await launchctl(['kickstart', '-k', `${domain()}/${LABEL}`])
+export async function restartRelayAgent(instance = '') {
+  const result = await launchctl(['kickstart', '-k', `${domain()}/${labelFor(instance)}`])
   if (result.code !== 0) throw new Error(`launchctl kickstart failed: ${result.stderr.trim()}`)
 }

@@ -31,6 +31,10 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 export const DOCK_APP_DIR = join(HERE, 'dock-app')
 const BUILD_DIR = join(DOCK_APP_DIR, 'build')
 export const BUNDLE_ID = 'io.github.taliesinb.dsh-dock-app'
+/** Bundle id of one instance (`<base>.<instance>` for a preview app beside the main one — separate WebKit data store). */
+export function bundleIdFor(instance = '') {
+  return instance === '' ? BUNDLE_ID : `${BUNDLE_ID}.${instance}`
+}
 const EXECUTABLE = 'DSH'
 const LSREGISTER = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 const SAFARI_WEBAPP_TEMPLATE = 'com.apple.Safari.WebApp'
@@ -129,9 +133,10 @@ function plistString(value) {
   return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-/** @param {{ name: string, version?: string }} spec */
+/** @param {{ name: string, version?: string, bundleId?: string }} spec */
 export function infoPlist(spec) {
   const name = plistString(spec.name)
+  const bundleId = spec.bundleId ?? BUNDLE_ID
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -140,7 +145,7 @@ export function infoPlist(spec) {
   <key>CFBundleDisplayName</key><string>${name}</string>
   <key>CFBundleExecutable</key><string>${EXECUTABLE}</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
-  <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
+  <key>CFBundleIdentifier</key><string>${bundleId}</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>${name}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -163,20 +168,21 @@ export function infoPlist(spec) {
 /**
  * Write a complete, signed bundle at `dest` (which must not exist).
  * @param {{ dest: string, name: string, url: string, fallbackUrl?: string, tokenFile?: string,
- *   executable: string, icns: string, version?: string }} spec
+ *   executable: string, icns: string, version?: string, bundleId?: string }} spec
  */
 export async function assembleBundle(spec) {
   const contents = join(spec.dest, 'Contents')
+  const bundleId = spec.bundleId ?? BUNDLE_ID
   await mkdir(join(contents, 'MacOS'), { recursive: true })
   await mkdir(join(contents, 'Resources'), { recursive: true })
-  await writeFile(join(contents, 'Info.plist'), infoPlist({ name: spec.name, version: spec.version }))
+  await writeFile(join(contents, 'Info.plist'), infoPlist({ name: spec.name, version: spec.version, bundleId }))
   await writeFile(join(contents, 'PkgInfo'), 'APPL????')
   await cp(spec.executable, join(contents, 'MacOS', EXECUTABLE))
   await chmod(join(contents, 'MacOS', EXECUTABLE), 0o755)
   await cp(spec.icns, join(contents, 'Resources', 'AppIcon.icns'))
   const config = { name: spec.name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile }
   await writeFile(join(contents, 'Resources', 'dsh-dock-app.json'), `${JSON.stringify(config, null, 2)}\n`)
-  await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', BUNDLE_ID, spec.dest])
+  await execFileAsync('/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', bundleId, spec.dest])
   return spec.dest
 }
 
@@ -195,7 +201,7 @@ export async function inspectBundle(path) {
     return { path, kind: 'other' }
   }
   const bundleId = typeof info.CFBundleIdentifier === 'string' ? info.CFBundleIdentifier : undefined
-  if (bundleId === BUNDLE_ID) {
+  if (bundleId === BUNDLE_ID || String(bundleId ?? '').startsWith(`${BUNDLE_ID}.`)) {
     let config = {}
     try {
       config = JSON.parse(await readFile(join(path, 'Contents', 'Resources', 'dsh-dock-app.json'), 'utf8'))
@@ -225,6 +231,12 @@ export async function dockAppStatus({ name, url }) {
     current: bundle.kind === 'wrapper' && bundle.url === url,
     toolchain: await toolchainAvailable(),
   }
+}
+
+/** Terminate a running copy of the bundle by executable path (no Apple Events, so no Automation prompt). */
+async function quitBundle(bundlePath) {
+  await execFileAsync('/usr/bin/pkill', ['-TERM', '-f', `${bundlePath}/Contents/MacOS/`]).catch(() => {})
+  await new Promise(resolve => setTimeout(resolve, 300))
 }
 
 /**
@@ -308,7 +320,7 @@ export async function removeDockTile(bundlePath, log = () => {}, { keepFirst = f
 
 /**
  * Build + assemble + replace + register + pin + launch.
- * @param {{ name: string, url: string, fallbackUrl?: string, tokenFile?: string, launch?: boolean,
+ * @param {{ name: string, url: string, fallbackUrl?: string, tokenFile?: string, launch?: boolean, instance?: string,
  *   glyphColor?: string, tileColor?: string, version?: string, log?: (line: string) => void }} spec
  */
 export async function installDockApp(spec) {
@@ -324,7 +336,7 @@ export async function installDockApp(spec) {
   await mkdir(applicationsDir(), { recursive: true })
   const staging = join(applicationsDir(), `.${name}.app.staging-${String(process.pid)}`)
   await rm(staging, { recursive: true, force: true })
-  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, executable: built.executable, icns: built.icns, version: spec.version })
+  await assembleBundle({ dest: staging, name, url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, executable: built.executable, icns: built.icns, version: spec.version, bundleId: bundleIdFor(spec.instance ?? '') })
   if (existing.kind !== 'none') {
     log(`dock-app: replacing ${existing.kind} at ${dest}${existing.url === undefined ? '' : ` (${existing.url})`}`)
     await quitBundle(dest)

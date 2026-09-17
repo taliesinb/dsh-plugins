@@ -104,6 +104,7 @@ not the machine.
 
 | key | default | |
 |---|---|---|
+| `instance` | `''` | `preview` etc.: suffixes the relay label (`….preview`), its symlink/logs (`-preview`), the Dock app bundle id (`….preview`) and the state file (`tailscale-remote-preview.json`), so a second DSH's remote coexists with the main one |
 | `listenHost` | `127.0.0.1` | proxy bind address (keep loopback) |
 | `listenPort` | `3084` | proxy port |
 | `publishPort` | `3083` | port `tailscale serve` points at — the relay; `0` publishes the proxy itself |
@@ -194,6 +195,24 @@ pnpm dock-app:status | pnpm dock-app:uninstall
 ```
 
 The same actions are buttons in Settings → Tailscale remote → *This Mac*.
+Every script takes `--instance preview` to address the preview pair.
+
+## Two instances side by side
+
+The row is installed in the live profile; `<plugins>/cordis.dev.yml` overrides
+its `config` for the preview server (`instance: preview`, ports 3085/3086,
+`mountPath: /dsh-preview`, `dockAppName: DSH Preview`, red glyph, `relayStart`
+= `pnpm dsh --profile web --patch …/cordis.dev.yml --no-open --port 3088`):
+
+```
+DSH.app          → /dsh          → relay :3083 (io.github.taliesinb.dsh-web-relay)         → proxy :3084 → dsh web :3080
+DSH Preview.app  → /dsh-preview  → relay :3085 (io.github.taliesinb.dsh-web-relay.preview) → proxy :3086 → dsh web :3088 (+ dev overlay)
+```
+
+Opening either Dock app cold starts *its* DSH. Because both servers run
+against the same `$DSH_HOME`, they share sessions and settings — the preview
+differs only in composition (the overlay) and identity (red icon, title
+`DSH preview :3088`).
 
 ## Develop
 

@@ -54,6 +54,8 @@ export interface RemoteStatus {
   servePort: number
   /** Port `tailscale serve` targets; 0 = the proxy itself (no relay). Absent on an older host. */
   publishPort?: number
+  /** '' for the main install, e.g. 'preview' for a second DSH's remote. */
+  instance?: string
   relay?: RelayStatus
   /** Absent on a host half older than this bundle. */
   dockApp?: DockAppStatus
@@ -66,6 +68,7 @@ export interface RelayStatus {
   pid?: number
   listening: boolean
   plist: string
+  label?: string
   logDir?: string
   command?: string
   spec: { listen: string; backend: string; dsh: string; cwd: string; start: string; logDir: string }
@@ -338,7 +341,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
       </div>
 
       {status.dockApp !== undefined && <div style={styles.group}>
-        <div style={styles.title}>This Mac</div>
+        <div style={styles.title}>This Mac{status.instance ? ` — ${status.instance} instance` : ''}</div>
         <div style={styles.caption}>
           {status.selfLogin === undefined
             ? 'This node has no Tailscale user (tagged device): its own requests carry no identity, so the Dock app would need the QR token.'
@@ -389,7 +392,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
               <div style={styles.caption}>
                 A LaunchAgent that always answers {status.relay.spec.listen} (what <code>tailscale serve</code> targets) and relays to the proxy on {status.relay.spec.backend}.
                 When DSH is not running it runs <span style={styles.mono}>{status.relay.spec.start}</span> in <span style={styles.mono}>{status.relay.spec.cwd}</span> and shows a “starting” page until it answers; logs in <span style={styles.mono}>{status.relay.spec.logDir}</span>.
-                Restart both with <span style={styles.mono}>launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay</span>.
+                Restart both with <span style={styles.mono}>launchctl kickstart -k gui/$UID/{status.relay.label ?? 'io.github.taliesinb.dsh-web-relay'}</span>.
               </div>
             </>
           )

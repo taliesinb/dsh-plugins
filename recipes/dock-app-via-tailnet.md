@@ -133,6 +133,45 @@ relay log `exited … → started dsh web → proxy port is back; splicing` in 2
 token fallback on `http://127.0.0.1:3093/?token=…` → 303 + cookie → 200;
 SIGTERM to the relay stopped its DSH process group.
 
+## Preview instance (done 2026-09-17)
+
+`config.instance` suffixes everything that must not collide: LaunchAgent label
+and Node symlink (`dsh-web-relay-preview`, also what Login Items shows), log
+files (`relay-preview.log`, `dsh-web-preview.log`), Dock app bundle id
+(`io.github.taliesinb.dsh-dock-app.preview` → its own WebKit data store) and
+the state file (`~/.dsh/tailscale-remote-preview.json`, so `enabled`/token are
+independent). The dev overlay `cordis.dev.yml` carries an **id-targeted config
+override** for `tali-tailscale-remote` (the row lives in the live profile; an
+`insert` of the same id would be a duplicate):
+
+```yaml
+- id: tali-tailscale-remote
+  config: { instance: preview, listenPort: 3086, publishPort: 3085, mountPath: /dsh-preview,
+            dockAppName: DSH Preview, dockAppGlyphColor: '#E5484D',
+            relayCwd: /Users/tali/github/deepseek-harness,
+            relayStart: pnpm dsh --profile web --patch /Users/tali/github/tali-dash-plugins/cordis.dev.yml --no-open --port 3088 }
+```
+
+Installed with `pnpm relay:install --instance preview --listen 127.0.0.1:3085 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 --cwd … --start "…"`,
+then a first `curl http://127.0.0.1:3085/` cold-started the preview DSH (3 s);
+its `?token=` URL is in `~/.dsh/logs/dsh-web-preview.log`, which is how an
+agent authenticates to the preview's control channel (`enable`,
+`install-dock-app`) — the preview Dock app was installed through that
+channel, i.e. the same code path as the panel button. Port 3081 (the older
+by-hand preview convention) was avoided because other sessions' ad-hoc servers
+use it. `DSH Preview.app` (Safari web app for :3081) was replaced in place.
+
+**Agents and the GUI.** Any browser on this Mac — including the
+`browser-automation` Safari Technology Preview windows — is identity-admitted
+at `https://tali-macbook-air.tailbce956.ts.net/dsh/` and `/dsh-preview/`, with
+no token; that supersedes the "an agent's own browser cannot open the live
+GUI" workaround in AGENTS.md for this machine.
+
+Changing host code (`index.js`, `proxy.mjs`, `dock-app.mjs`, `relay/*`) needs
+a restart of the affected instance: `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`
+restarts the preview relay **and** the preview DSH it spawned (verified: the
+`quitBundle is not defined` slip surfaced only after such a restart).
+
 ## What failed on the way (keep)
 
 | Attempt / symptom | Cause / fix |
@@ -147,6 +186,7 @@ SIGTERM to the relay stopped its DSH process group.
 | Login Items / "App Background Activity" names the agent **zsh** | the item is named after `ProgramArguments[0]`; the agent now runs a symlink `…/Application Support/dsh-tailscale-remote/dsh-web-relay → node` |
 | Live GUI hot-swapped a client bundle whose host lacked the new fields | the plugin is installed live, so `pnpm build` in its directory swaps the open GUI; the client now tolerates `dockApp`/`relay` being absent — always keep new client fields optional |
 | First relay probe with `Host: node` and no `x-forwarded-proto` → 421 in the WebSocket test | canonical authorities carry an explicit port; tailscaled always sends `x-forwarded-proto: https`, the test now does too |
+| Preview `install-dock-app` → `quitBundle is not defined` | a scripted block replacement in `dock-app.mjs` deleted a helper defined inside the replaced span; tests did not cover install (it touches ~/Applications). Restored; restart the instance after host edits |
 
 ## Troubleshooting
 

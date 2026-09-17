@@ -28,3 +28,21 @@
     # instance is never confused with the live server. Dev overlay ONLY.
     - id: tali-preview-identity
       name: '/Users/tali/github/tali-dash-plugins/plugins/preview-identity/index.js'
+
+# Preview instance of the Tailscale remote (the row itself is installed in the
+# live profile; this overrides its config for the preview server only).
+# Preview pair beside the live one: DSH Preview.app (red icon) →
+# https://<node>/dsh-preview/ → relay :3085 (LaunchAgent
+# io.github.taliesinb.dsh-web-relay.preview) → proxy :3086 → dsh web :3088
+# (live home + this overlay). State: ~/.dsh/tailscale-remote-preview.json,
+# logs ~/.dsh/logs/{relay,dsh-web}-preview.log. Recipe: recipes/dock-app-via-tailnet.md
+- id: tali-tailscale-remote
+  config:
+    instance: preview
+    listenPort: 3086
+    publishPort: 3085
+    mountPath: /dsh-preview
+    dockAppName: DSH Preview
+    dockAppGlyphColor: '#E5484D'
+    relayCwd: /Users/tali/github/deepseek-harness
+    relayStart: pnpm dsh --profile web --patch /Users/tali/github/tali-dash-plugins/cordis.dev.yml --no-open --port 3088

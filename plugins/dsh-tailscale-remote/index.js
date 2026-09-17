@@ -21,6 +21,9 @@
  * from the settings section or the pnpm scripts.
  *
  * Node half only here; the browser half is `./client` (lib/client.js). Config:
+ *   instance     '' for the main install; 'preview' keeps a second DSH's
+ *                relay LaunchAgent, Dock app bundle id, state file and
+ *                logs apart from the main ones                      ''
  *   listenHost   loopback address of the proxy                     127.0.0.1
  *   listenPort   proxy port                                        3084
  *   publishPort  port tailscale serve points at: the relay's port, or 0 to
@@ -48,6 +51,7 @@ export const name = 'tailscale-remote'
 export const inject = ['webServer', 'connection']
 
 export const Config = Schema.object({
+  instance: Schema.string().default(''),
   listenHost: Schema.string().default('127.0.0.1'),
   listenPort: Schema.natural().max(65535).default(3084),
   publishPort: Schema.natural().max(65535).default(3083),
@@ -146,7 +150,8 @@ export async function controlRoute(req, res, connection, dispatch) {
  * @param {ReturnType<typeof Config>} config
  */
 export function apply(ctx, config) {
-  const stateFile = config.stateFile || defaultStateFile()
+  const instance = config.instance.trim()
+  const stateFile = config.stateFile || (instance === '' ? defaultStateFile() : defaultStateFile().replace(/\.json$/, `-${instance}.json`))
   const mountPath = normalizeMountPath(config.mountPath)
   const log = message => ctx.logger.info(message)
   const warn = message => ctx.logger.warn(message)
@@ -219,6 +224,7 @@ export function apply(ctx, config) {
   const relayCwd = config.relayCwd || process.cwd()
   const relayLogDir = config.relayLogDir || defaultLogDir()
   const relaySpec = () => ({
+    instance,
     listen: `127.0.0.1:${String(config.publishPort)}`,
     backend: `${config.listenHost}:${String(config.listenPort)}`,
     dsh: `127.0.0.1:${String(ctx.webServer.port)}`,
@@ -240,7 +246,7 @@ export function apply(ctx, config) {
     const url = route.url
     const tokenUrl = url === undefined ? undefined : `${url}?${TOKEN_QUERY}=${encodeURIComponent(state.token)}`
     const [relay, dockApp] = await Promise.all([
-      config.publishPort !== 0 ? relayStatus({ listenPort: config.publishPort }) : Promise.resolve(undefined),
+      config.publishPort !== 0 ? relayStatus({ listenPort: config.publishPort, instance }) : Promise.resolve(undefined),
       dockAppStatus({ name: config.dockAppName, url: url ?? '' }),
     ])
     return {
@@ -259,6 +265,7 @@ export function apply(ctx, config) {
       mountPath,
       servePort: config.servePort,
       publishPort: config.publishPort,
+      instance,
       relay: relay === undefined ? undefined : { ...relay, spec: relaySpec() },
       dockApp: { ...dockApp, name: config.dockAppName, fallbackUrl: fallbackUrl() },
     }
@@ -319,6 +326,7 @@ export function apply(ctx, config) {
     try {
       const result = await installDockApp({
         name: config.dockAppName,
+        instance,
         url: route.url,
         fallbackUrl: fallbackUrl(),
         tokenFile: stateFile,
@@ -346,7 +354,7 @@ export function apply(ctx, config) {
     if (config.publishPort === 0) return fail('no-relay', 'publishPort is 0: the proxy is published directly, there is no relay to install')
     try {
       const result = await installRelayAgent({ ...relaySpec(), log })
-      if (!result.listening) warn(`tailscale-remote: relay LaunchAgent loaded but 127.0.0.1:${String(config.publishPort)} is not answering yet — see ${relayLogDir}/relay.log`)
+      if (!result.listening) warn(`tailscale-remote: relay LaunchAgent loaded but 127.0.0.1:${String(config.publishPort)} is not answering yet — see ${relayLogDir}/relay${instance === '' ? '' : `-${instance}`}.log`)
     } catch (error) {
       return fail('relay', String(error?.message ?? error))
     }
@@ -355,7 +363,7 @@ export function apply(ctx, config) {
 
   const uninstallRelay = () => exclusive(async () => {
     try {
-      await uninstallRelayAgent({ log })
+      await uninstallRelayAgent({ instance, log })
     } catch (error) {
       return fail('relay', String(error?.message ?? error))
     }

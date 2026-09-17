@@ -227,7 +227,13 @@ tokened-URL and HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
 
 `dsh web` authenticates the browser with a per-process launch token printed
 only in its terminal, so an agent's own browser usually cannot open the live
-GUI. Alternative used in `recipes/wolfram-kernel-supervisor.md`: load
+GUI. **On Tali's Mac this no longer holds**: with `dsh-tailscale-remote`
+installed, any browser on the machine (incl. the `browser-automation` STP
+windows) is admitted by the node's own Tailscale identity at
+`https://tali-macbook-air.tailbce956.ts.net/dsh/` (live) and `/dsh-preview/`
+(preview server, started on demand by its relay; its `?token=` URL is in
+`~/.dsh/logs/dsh-web-preview.log`) — see `recipes/dock-app-via-tailnet.md`.
+Elsewhere, the fallback below still applies. Alternative used in `recipes/wolfram-kernel-supervisor.md`: load
 `lib/client.js` in Node under a fake `window.__ModuleLoader__` with stub
 platform modules, capture what `apply(ctx)` registers, and replay a real
 session log (`zstd -dc $DSH_HOME/sessions/<ws>/<session>/session.jsonl.zstd`)

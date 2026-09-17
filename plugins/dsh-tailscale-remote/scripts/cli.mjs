@@ -11,6 +11,7 @@
  *   pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
  *                         [--token-file ~/.dsh/tailscale-remote.json] [--no-launch]
  *   pnpm dock-app:uninstall [--name DSH]
+ *   … every command takes `--instance preview` to address a second (preview) DSH's relay/app.
  *
  * `--url` defaults to this node's route (`tailscale status` → https://<fqdn>/dsh/).
  * Everything here is macOS-only and exits 0 with a note elsewhere, so the
@@ -59,9 +60,11 @@ async function main() {
     return
   }
   const log = line => console.log(line)
+  const instance = typeof flags.instance === 'string' ? flags.instance : ''
   switch (command) {
     case 'relay:install': {
       const result = await installRelayAgent({
+        instance,
         listen: String(flags.listen ?? '127.0.0.1:3083'),
         backend: String(flags.backend ?? '127.0.0.1:3084'),
         dsh: String(flags.dsh ?? '127.0.0.1:3080'),
@@ -74,11 +77,11 @@ async function main() {
       return
     }
     case 'relay:uninstall':
-      await uninstallRelayAgent({ log })
+      await uninstallRelayAgent({ instance, log })
       return
     case 'relay:status': {
       const port = Number(String(flags.listen ?? '127.0.0.1:3083').split(':').pop())
-      console.log(JSON.stringify(await relayStatus({ listenPort: port }), null, 2))
+      console.log(JSON.stringify(await relayStatus({ listenPort: port, instance }), null, 2))
       return
     }
     case 'dock-app:build':
@@ -89,6 +92,7 @@ async function main() {
       const url = await routeUrl(flags)
       const result = await installDockApp({
         name,
+        instance,
         url,
         fallbackUrl: String(flags.fallback ?? 'http://127.0.0.1:3083/'),
         tokenFile: expandHome(String(flags['token-file'] ?? defaultStateFile())),
