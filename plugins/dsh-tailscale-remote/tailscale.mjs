@@ -3,7 +3,8 @@
  *
  *   tailscale serve --bg --yes --https=443 --set-path /dsh http://127.0.0.1:<proxy>
  *
- * publishes the PROXY (never the DSH backend) at `https://<node-fqdn>/dsh/`.
+ * publishes the relay (or, with `publishPort: 0`, the proxy — never the DSH
+ * backend) at `https://<node-fqdn>/dsh/`.
  * tailscaled strips the mount prefix before forwarding (verified: `/dsh`,
  * `/dsh/` and `/dsh/x?y` arrive as `/`, `/` and `/x?y`), keeps the tailnet
  * `Host`, and adds `x-forwarded-{for,host,proto}`. For a request from a
@@ -114,7 +115,12 @@ export function createTailscaleManager(options) {
 
   /**
    * @returns {Promise<{ state: 'off'|'active'|'conflict'|'unavailable', detail?: string, binary?: string,
-   *   dnsName?: string, backendState?: string, url?: string, mappedTarget?: string }>}
+   *   dnsName?: string, backendState?: string, url?: string, mappedTarget?: string,
+   *   selfLogin?: string, selfAddresses?: string[] }>}
+   *   `selfLogin` / `selfAddresses` describe THIS node (its user's login as Serve
+   *   will inject it for requests the node makes to itself, and its tailnet
+   *   IPs, which appear as `x-forwarded-for` on such requests). Absent when the
+   *   node is tagged (tagged nodes have no user identity).
    */
   const status = async () => {
     const cli = await resolveBinary()
@@ -123,7 +129,7 @@ export function createTailscaleManager(options) {
     const nodeJson = node.code === 0 ? parseJson(node.stdout) : undefined
     if (nodeJson === undefined) return { state: 'unavailable', detail: 'daemon-unreachable', binary: cli }
     const dnsName = String(nodeJson.Self?.DNSName ?? '').replace(/\.$/, '')
-    const base = { binary: cli, backendState: nodeJson.BackendState, dnsName: dnsName || undefined }
+    const base = { binary: cli, backendState: nodeJson.BackendState, dnsName: dnsName || undefined, ...selfIdentity(nodeJson) }
     if (dnsName !== '') base.url = routeUrl(dnsName, options.port, mount)
     if (nodeJson.BackendState !== 'Running') return { ...base, state: 'unavailable', detail: 'not-running' }
     const serve = await run(cli, ['serve', 'status', '--json'])
@@ -180,6 +186,25 @@ export function createTailscaleManager(options) {
       return 'ok'
     },
   }
+}
+
+/**
+ * This node's own identity from `tailscale status --json`: the login Serve
+ * injects for the node's requests to itself (undefined for tagged nodes, which
+ * carry no user) and the node's tailnet addresses.
+ * @param {any} statusJson
+ * @returns {{ selfLogin?: string, selfAddresses: string[] }}
+ */
+export function selfIdentity(statusJson) {
+  const self = statusJson?.Self ?? {}
+  const addresses = Array.isArray(self.TailscaleIPs) ? self.TailscaleIPs.map(String) : []
+  const tags = Array.isArray(self.Tags) ? self.Tags : []
+  const userId = self.UserID
+  const user = userId === undefined ? undefined : statusJson?.User?.[String(userId)]
+  const login = tags.length === 0 && typeof user?.LoginName === 'string' && user.LoginName !== '' && user.LoginName !== 'tagged-devices'
+    ? user.LoginName.toLowerCase()
+    : undefined
+  return { selfLogin: login, selfAddresses: addresses }
 }
 
 /** A loopback proxy target on our mount is assumed to be an earlier run of ours. */

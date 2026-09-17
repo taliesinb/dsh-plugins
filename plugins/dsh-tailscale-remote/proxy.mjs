@@ -4,13 +4,31 @@
  * Every request is admitted by exactly one of:
  *   1. an allowlisted tailnet user — `Tailscale-User-Login` injected by Serve,
  *      trusted only when the forwarding facts look like a Serve peer (loopback
- *      socket, rightmost `x-forwarded-for` inside Tailscale's address ranges);
+ *      socket, rightmost `x-forwarded-for` inside Tailscale's address ranges).
+ *      This node's own login (`selfLogin`) is always allowed: the Mac talking
+ *      to itself through Serve is the operator — that is how the Dock app gets
+ *      in without any token or cookie;
  *   2. the standing token as `?token=` on a GET of `/` (what the QR encodes) —
  *      exchanged for the proxy's own HttpOnly cookie and redirected to `./`;
  *   3. that cookie.
  * Anything else is 401. The DSH control channel of this plugin
  * (`/tailscale-remote/*`) is never forwarded, so the remote page cannot flip
  * the route or read the token.
+ *
+ * Before admission, two same-origin checks that DSH itself would otherwise be
+ * unable to make (we rewrite Host/Origin to loopback before forwarding):
+ *   - `Host` must be one of the public authorities (the tailnet FQDN, with or
+ *     without the Serve port) or the listener's own loopback authority — a DNS
+ *     rebinding page pointing `evil.example` at 127.0.0.1 gets 421;
+ *   - an attached `Origin` must equal that Host — a cross-site page cannot ride
+ *     an identity-admitted browser (identity has no SameSite cookie protecting
+ *     it) into `/api`; mismatches get 403.
+ *
+ * Index responses for requests the node makes to itself (rightmost
+ * `x-forwarded-for` is one of its own tailnet addresses) additionally carry
+ * `globalThis.__DSH_TRANSPORT__ = { ownsHost: true }`: the shell then reports
+ * `ctx.connection.isLoopback`, so Settings persist on the host exactly as they
+ * do at http://127.0.0.1:<port>/ (the same hook DSH's desktop host uses).
  *
  * Admitted requests are forwarded to DSH on loopback with `Host`/`Origin`
  * rewritten to the loopback authority (DSH's /api Host+Origin fence) and the
@@ -43,6 +61,8 @@ const MAX_REQUEST_BYTES = 64 * 1024 * 1024
 /** Runs before any other head script: fixes `https://node/dsh` → `https://node/dsh/`. */
 const TRAILING_SLASH_GUARD = '<script data-plugin="dsh-tailscale-remote">(function(){var p=location.pathname;'
   + 'if(!p.endsWith("/")&&!p.endsWith("/index.html"))location.replace(p+"/"+location.search+location.hash)})()</script>'
+/** For the node's own requests: the shell treats the page as the operator's machine (`ctx.connection.isLoopback`). */
+export const OWNS_HOST_SCRIPT = '<script data-plugin="dsh-tailscale-remote">globalThis.__DSH_TRANSPORT__=Object.assign(globalThis.__DSH_TRANSPORT__||{},{ownsHost:true})</script>'
 
 function isLoopbackAddress(address) {
   const ip = String(address ?? '').replace(/^::ffff:/i, '')
@@ -73,6 +93,55 @@ export function identityOf(req, allowedUsers) {
   const login = normalizeLogin(Array.isArray(raw) ? raw[0] : raw)
   if (login === '' || !allowedUsers.includes(login)) return undefined
   return looksLikeServePeer(req) ? login : undefined
+}
+
+/** The rightmost forwarded address, or the socket peer for a direct connection. */
+export function clientAddress(req) {
+  return lastHeader(req.headers['x-forwarded-for']) ?? String(req.socket.remoteAddress ?? '').replace(/^::ffff:/i, '')
+}
+
+/** Whether the request was made by this very node (through Serve) — the operator's own machine. */
+export function isSelfRequest(req, selfAddresses) {
+  if (selfAddresses.length === 0 || !looksLikeServePeer(req)) return false
+  const last = lastHeader(req.headers['x-forwarded-for'])
+  return last !== undefined && selfAddresses.includes(last.replace(/^::ffff:/i, ''))
+}
+
+/**
+ * Canonical `hostname:port` (port always explicit, so `node:443` over https and
+ * `node` are the same authority) for an authority or an absolute URL.
+ * @param {unknown} value `host[:port]` or `scheme://host[:port]`
+ * @param {'http'|'https'} scheme default scheme when `value` is a bare authority
+ */
+export function canonicalAuthority(value, scheme = 'https') {
+  const text = String(value ?? '').trim()
+  if (text === '') return undefined
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `${scheme}://${text}`)
+    if (url.hostname === '') return undefined
+    const port = url.port !== '' ? url.port : url.protocol === 'https:' ? '443' : url.protocol === 'http:' ? '80' : ''
+    return `${url.hostname.toLowerCase()}:${port}`
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Same-origin fence, evaluated before admission.
+ * @param {import('node:http').IncomingMessage} req
+ * @param {Set<string>} allowedHosts canonical authorities (see {@link canonicalAuthority})
+ * @returns {{ status: number, message: string } | undefined}
+ */
+export function originRejection(req, allowedHosts) {
+  const scheme = requestIsHttps(req) ? 'https' : 'http'
+  const host = canonicalAuthority(req.headers.host, scheme)
+  if (host === undefined || !allowedHosts.has(host)) {
+    return { status: 421, message: `this DSH remote does not serve the host "${String(req.headers.host ?? '')}"` }
+  }
+  const origin = Array.isArray(req.headers.origin) ? req.headers.origin[0] : req.headers.origin
+  if (origin === undefined) return undefined
+  if (canonicalAuthority(origin, scheme) !== host) return { status: 403, message: 'cross-origin request refused' }
+  return undefined
 }
 
 function safeEqual(a, b) {
@@ -196,13 +265,35 @@ export function bootstrapUpstreamCookie(connection, authority) {
  *   backendHost: string, backendPort: number,
  *   connection: { authenticatedUrl(base: string): string },
  *   token: () => string, allowedUsers: () => string[],
+ *   selfLogin?: () => string | undefined, selfAddresses?: () => string[],
+ *   publicHosts?: () => string[],
  *   cookieName: string, controlPrefix: string, mountPath?: string,
  *   log?: (line: string) => void, warn?: (line: string) => void,
  * }} spec
+ *   `publicHosts` are the authorities clients may name in `Host` besides the
+ *   listener itself (the tailnet FQDN, with and without the Serve port).
  */
 export async function startProxy(spec) {
   const backendAuthority = `${spec.backendHost}:${String(spec.backendPort)}`
   const mount = String(spec.mountPath ?? '/').replace(/\/+$/, '') || '/'
+  const selfLogin = spec.selfLogin ?? (() => undefined)
+  const selfAddresses = spec.selfAddresses ?? (() => [])
+  const publicHosts = spec.publicHosts ?? (() => [])
+  /** Everyone allowed by login: the operator's list plus this node's own login. */
+  const allowedLogins = () => {
+    const self = normalizeLogin(selfLogin())
+    const list = spec.allowedUsers()
+    return self !== '' && !list.includes(self) ? [...list, self] : list
+  }
+  let listenerAuthorities = new Set()
+  const allowedHosts = () => {
+    const hosts = new Set(listenerAuthorities)
+    for (const host of publicHosts()) {
+      const normalized = canonicalAuthority(host, 'https')
+      if (normalized !== undefined) hosts.add(normalized)
+    }
+    return hosts
+  }
   let upstreamCookie = await bootstrapUpstreamCookie(spec.connection, backendAuthority)
   let upstreamCookieAt = Date.now()
   let refreshing
@@ -229,7 +320,7 @@ export async function startProxy(spec) {
 
   /** @returns {{ kind: 'user', login: string } | { kind: 'cookie' } | undefined} */
   const admit = (req) => {
-    const login = identityOf(req, spec.allowedUsers())
+    const login = identityOf(req, allowedLogins())
     if (login !== undefined) return { kind: 'user', login }
     const cookie = cookieOf(req.headers.cookie, spec.cookieName)
     if (cookie !== undefined && safeEqual(cookie, cookieValueFor(spec.token()))) return { kind: 'cookie' }
@@ -255,6 +346,12 @@ export async function startProxy(spec) {
       sendText(res, 403, 'the Tailscale remote is controlled from the DSH host only\n')
       return
     }
+    const fence = originRejection(req, allowedHosts())
+    if (fence !== undefined) {
+      drain(req)
+      sendText(res, fence.status, `${fence.message}\n`)
+      return
+    }
     // Token exchange: only on the shell entry, only GET/HEAD, exactly one token.
     const url = new URL(req.url ?? '/', 'http://x')
     if (url.searchParams.has(TOKEN_QUERY)) {
@@ -268,7 +365,7 @@ export async function startProxy(spec) {
           'set-cookie': setCookieHeader(req, cookieValueFor(spec.token()), 400 * 24 * 3600),
         })
         res.end()
-        spec.log?.(`tailscale-remote: token accepted from ${lastHeader(req.headers['x-forwarded-for']) ?? req.socket.remoteAddress ?? '?'}`)
+        spec.log?.(`tailscale-remote: token accepted from ${clientAddress(req) || '?'}`)
         return
       }
       unauthorizedPage(res, req, 'The link is not valid for this DSH host (the token may have been rotated).')
@@ -309,7 +406,8 @@ export async function startProxy(spec) {
         upRes.on('data', chunk => chunks.push(chunk))
         upRes.on('end', () => {
           const html = Buffer.concat(chunks).toString('utf8')
-          const body = Buffer.from(html.replace(/<head(?:\s[^>]*)?>/i, open => `${open}${TRAILING_SLASH_GUARD}`), 'utf8')
+          const injected = TRAILING_SLASH_GUARD + (isSelfRequest(req, selfAddresses()) ? OWNS_HOST_SCRIPT : '')
+          const body = Buffer.from(html.replace(/<head(?:\s[^>]*)?>/i, open => `${open}${injected}`), 'utf8')
           delete relayed['content-length']
           delete relayed['transfer-encoding']
           res.writeHead(status, { ...relayed, 'content-length': String(body.byteLength) })
@@ -334,6 +432,11 @@ export async function startProxy(spec) {
   server.on('upgrade', (req, socket, head) => {
     track(socket)
     const path = pathnameOf(req.url)
+    const fence = originRejection(req, allowedHosts())
+    if (fence !== undefined) {
+      socket.end(`HTTP/1.1 ${String(fence.status)} ${fence.status === 421 ? 'Misdirected Request' : 'Forbidden'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
+      return
+    }
     const admitted = path.startsWith(spec.controlPrefix) ? undefined : admit(req)
     if (admitted === undefined) {
       socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
@@ -377,6 +480,10 @@ export async function startProxy(spec) {
   })
   const address = server.address()
   const port = typeof address === 'object' && address !== null ? address.port : spec.listenPort
+  // Direct (non-Serve) clients name the listener itself, over plain http.
+  listenerAuthorities = new Set([spec.listenHost, '127.0.0.1', 'localhost', '[::1]']
+    .map(host => canonicalAuthority(`${host}:${String(port)}`, 'http'))
+    .filter(value => value !== undefined))
 
   return {
     host: spec.listenHost,

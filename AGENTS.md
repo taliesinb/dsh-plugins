@@ -297,6 +297,15 @@ can reproduce or maintain it:
   manifest cannot fix it (web-app scope is host-only, `window.open` never
   leaves the app) and the `foreign-link-opener` plugin that hands such links
   to real Safari via `open -a`.
+- `dock-app-via-tailnet.md` — the DSH Dock app as a native WKWebView wrapper
+  (`dsh-tailscale-remote/dock-app`) admitted by this Mac's own Tailscale
+  identity, plus the always-on relay LaunchAgent that starts `dsh web` on a
+  cold open: why the Safari web app broke (30-day cookie, no URL bar), why a
+  web-app bundle cannot be fabricated (LS template-app data vault), why not
+  GUI-scripting Safari (TCC/cdhash), the relay's "answer first, start DSH,
+  self-reloading splash" trick, the proxy's Host/Origin fence and
+  `ownsHost` injection, the live rollout order while the old host code still
+  ran, and the Dock-plist `<data>` trap.
 - `fs-tools-plugin.md` — batch filesystem tools beside the built-ins
   (`fs-tools` plugin: `list_dir` with directories, `read_many` that emits
   `fs/observed`, `edit_many` validated-before-write across files, `search` =
@@ -349,7 +358,8 @@ can reproduce or maintain it:
   `tailscale serve --set-path /dsh` + "Tailscale remote" settings section with
   Enable/Disable, URL, allowed-user list, tokened QR), the DSH branch
   `fix/tailscale-mounting` (document-relative Host URLs; why a worktree), the
-  measured Tailscale path-strip facts, and the trailing-slash trap.
+  measured Tailscale path-strip facts, and the trailing-slash trap. Ports and
+  the Dock app / relay moved on in `dock-app-via-tailnet.md`.
 - `wolfram-kernel-supervisor.md` — per-chat Wolfram/Mathematica kernels
   (`wolfram-kernel-supervisor` plugin): the Pi `wolfram_Show`/rho archaeology,
   why the paclet fork's Show tool is obsolete, `wolfram_show`'s user-only image

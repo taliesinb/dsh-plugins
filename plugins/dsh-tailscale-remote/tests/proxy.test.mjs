@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict'
 import { createServer, request as httpRequest } from 'node:http'
 import { after, before, describe, it } from 'node:test'
-import { bootstrapUpstreamCookie, cookieValueFor, startProxy } from '../proxy.mjs'
+import { bootstrapUpstreamCookie, canonicalAuthority, cookieValueFor, isSelfRequest, originRejection, startProxy } from '../proxy.mjs'
 
 const LAUNCH_TOKEN = 'launch-token-xyz'
 const DSH_COOKIE = 'dsh-auth-abc=v1.payload.sig'
@@ -18,6 +18,8 @@ let proxy
 const seen = []
 let token = 'T0kenT0kenT0kenT0ken'
 let allowedUsers = ['alice@example.com']
+let selfLogin = 'Tali@Example.com'
+const SELF_ADDRESS = '100.78.174.43'
 
 function fetchProxy(path, { method = 'GET', headers = {}, body } = {}) {
   return new Promise((resolve, reject) => {
@@ -79,6 +81,9 @@ before(async () => {
     connection: { authenticatedUrl: base => `${base}/?token=${LAUNCH_TOKEN}` },
     token: () => token,
     allowedUsers: () => allowedUsers,
+    selfLogin: () => selfLogin,
+    selfAddresses: () => [SELF_ADDRESS, 'fd7a:115c:a1e0::e33a:ae2c'],
+    publicHosts: () => ['node.tailnet.ts.net', 'node.tailnet.ts.net:443'],
     cookieName: 'dsh-tailscale-remote',
     controlPrefix: '/tailscale-remote',
     mountPath: '/dsh',
@@ -180,6 +185,31 @@ describe('gate', () => {
     allowedUsers = saved
   })
 
+  it('always admits this node\'s own login, even with an empty allowlist', async () => {
+    const saved = allowedUsers
+    allowedUsers = []
+    assert.equal((await fetchProxy('/api/whoami', { headers: servePeer('tali@example.com') })).status, 200)
+    assert.equal((await fetchProxy('/api/whoami', { headers: { ...servePeer('tali@example.com'), 'x-forwarded-for': '203.0.113.9' } })).status, 401, 'still needs Serve forwarding facts')
+    const savedSelf = selfLogin
+    selfLogin = undefined
+    assert.equal((await fetchProxy('/api/whoami', { headers: servePeer('tali@example.com') })).status, 401, 'a tagged node has no self login')
+    selfLogin = savedSelf
+    allowedUsers = saved
+  })
+
+  it('refuses an unknown Host (421) and a cross-origin Origin (403) before admission', async () => {
+    const rebinding = await fetchProxy('/api/whoami', { headers: { ...servePeer('alice@example.com'), host: 'evil.example' } })
+    assert.equal(rebinding.status, 421)
+    const cross = await fetchProxy('/api/whoami', { method: 'POST', headers: { ...servePeer('alice@example.com'), origin: 'https://evil.example' } })
+    assert.equal(cross.status, 403)
+    const same = await fetchProxy('/api/whoami', { method: 'POST', headers: { ...servePeer('alice@example.com'), origin: 'https://node.tailnet.ts.net' } })
+    assert.equal(same.status, 200)
+    const withPort = await fetchProxy('/api/whoami', { headers: { ...servePeer('alice@example.com'), host: 'node.tailnet.ts.net:443', origin: 'https://node.tailnet.ts.net:443' } })
+    assert.equal(withPort.status, 200)
+    const loopback = await fetchProxy('/api/whoami', { headers: { cookie: `dsh-tailscale-remote=${cookieValueFor(token)}`, origin: `http://127.0.0.1:${proxy.port}` } })
+    assert.equal(loopback.status, 200, 'the listener\'s own authority is always allowed')
+  })
+
   it('never forwards the control channel', async () => {
     seen.length = 0
     const res = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer('alice@example.com'), 'content-type': 'application/json' }, body: '{}' })
@@ -203,6 +233,46 @@ describe('index response', () => {
     assert.match(res.body, /location\.replace\(p\+"\/"/)
     assert.equal(Number(res.headers['content-length']), Buffer.byteLength(res.body))
     assert.equal(seen.at(-1).headers['accept-encoding'], 'identity', 'index is requested uncompressed so it can be rewritten')
+    assert.doesNotMatch(res.body, /ownsHost/, 'another device is not the operator\'s machine')
+  })
+
+  it('marks the node\'s own requests as owning the host (ctx.connection.isLoopback)', async () => {
+    const res = await fetchProxy('/', { headers: { ...servePeer('tali@example.com'), 'x-forwarded-for': SELF_ADDRESS } })
+    assert.equal(res.status, 200)
+    assert.match(res.body, /__DSH_TRANSPORT__=Object\.assign\(globalThis\.__DSH_TRANSPORT__\|\|\{\},\{ownsHost:true\}\)/)
+    assert.equal(Number(res.headers['content-length']), Buffer.byteLength(res.body))
+  })
+})
+
+describe('pure helpers', () => {
+  const fake = (headers, remoteAddress = '127.0.0.1') => ({ headers, socket: { remoteAddress } })
+  it('canonicalAuthority: explicit default ports, lower-cased hostnames', () => {
+    assert.equal(canonicalAuthority('Node.tailnet.ts.net'), 'node.tailnet.ts.net:443')
+    assert.equal(canonicalAuthority('node.tailnet.ts.net:443'), 'node.tailnet.ts.net:443')
+    assert.equal(canonicalAuthority('https://node.tailnet.ts.net:443/x'), 'node.tailnet.ts.net:443')
+    assert.equal(canonicalAuthority('127.0.0.1:3084', 'http'), '127.0.0.1:3084')
+    assert.equal(canonicalAuthority('http://localhost:3084'), 'localhost:3084')
+    assert.equal(canonicalAuthority('[::1]:3084', 'http'), '[::1]:3084')
+    assert.equal(canonicalAuthority('null'), 'null:443', 'an opaque origin never equals a real host')
+    assert.equal(canonicalAuthority(''), undefined)
+  })
+  it('originRejection: host allowlist then origin equality', () => {
+    const https = { 'x-forwarded-proto': 'https' }
+    const allowed = new Set(['node.tailnet.ts.net:443', '127.0.0.1:3084'])
+    assert.equal(originRejection(fake({ ...https, host: 'node.tailnet.ts.net' }), allowed), undefined)
+    assert.equal(originRejection(fake({ ...https, host: 'NODE.tailnet.ts.net:443', origin: 'https://node.tailnet.ts.net' }), allowed), undefined)
+    assert.equal(originRejection(fake({ host: '127.0.0.1:3084', origin: 'http://127.0.0.1:3084' }), allowed), undefined)
+    assert.equal(originRejection(fake({ ...https, host: 'other' }), allowed)?.status, 421)
+    assert.equal(originRejection(fake({}), allowed)?.status, 421)
+    assert.equal(originRejection(fake({ host: 'node.tailnet.ts.net' }), allowed)?.status, 421, 'plain http to the public name is not the published authority')
+    assert.equal(originRejection(fake({ ...https, host: 'node.tailnet.ts.net', origin: 'null' }), allowed)?.status, 403)
+    assert.equal(originRejection(fake({ ...https, host: 'node.tailnet.ts.net', origin: 'https://node.tailnet.ts.net:8443' }), allowed)?.status, 403)
+  })
+  it('isSelfRequest: Serve peer whose forwarded address is one of ours', () => {
+    assert.equal(isSelfRequest(fake({ 'x-forwarded-for': SELF_ADDRESS }), [SELF_ADDRESS]), true)
+    assert.equal(isSelfRequest(fake({ 'x-forwarded-for': '100.1.1.1' }), [SELF_ADDRESS]), false)
+    assert.equal(isSelfRequest(fake({ 'x-forwarded-for': SELF_ADDRESS }, '10.0.0.5'), [SELF_ADDRESS]), false, 'not via Serve')
+    assert.equal(isSelfRequest(fake({}), [SELF_ADDRESS]), false)
   })
 })
 
@@ -211,7 +281,7 @@ describe('websocket', () => {
     const { connect } = await import('node:net')
     const open = (headers) => new Promise((resolve) => {
       const socket = connect(proxy.port, '127.0.0.1', () => {
-        socket.write(`GET /api/remote.mux HTTP/1.1\r\nHost: node.tailnet.ts.net\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n${headers}\r\n`)
+        socket.write(`GET /api/remote.mux HTTP/1.1\r\nHost: node.tailnet.ts.net\r\nX-Forwarded-Proto: https\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Key: abc\r\nSec-WebSocket-Version: 13\r\n${headers}\r\n`)
       })
       let text = ''
       socket.on('data', (chunk) => {
@@ -219,7 +289,7 @@ describe('websocket', () => {
         if (text.includes('hello-from-dsh')) {
           socket.write('ping')
         }
-        if (text.includes('echo:ping') || text.startsWith('HTTP/1.1 401')) {
+        if (text.includes('echo:ping') || /^HTTP\/1\.1 4\d\d/.test(text)) {
           socket.destroy()
           resolve(text)
         }
@@ -227,7 +297,9 @@ describe('websocket', () => {
     })
     const denied = await open('')
     assert.match(denied, /^HTTP\/1\.1 401/)
-    const ok = await open(`X-Forwarded-For: 100.101.102.103\r\nTailscale-User-Login: alice@example.com\r\n`)
+    const crossSite = await open(`X-Forwarded-For: 100.101.102.103\r\nTailscale-User-Login: alice@example.com\r\nOrigin: https://evil.example\r\n`)
+    assert.match(crossSite, /^HTTP\/1\.1 403/)
+    const ok = await open(`X-Forwarded-For: 100.101.102.103\r\nTailscale-User-Login: alice@example.com\r\nOrigin: https://node.tailnet.ts.net\r\n`)
     assert.match(ok, /^HTTP\/1\.1 101/)
     assert.match(ok, /echo:ping/)
     const upgrade = seen.findLast(entry => entry.method === 'UPGRADE')

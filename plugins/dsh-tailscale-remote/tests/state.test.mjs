@@ -4,7 +4,23 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { loadState, parseUserList, saveState } from '../state.mjs'
-import { normalizeMountPath, routeUrl, isTailscaleAddress } from '../tailscale.mjs'
+import { normalizeMountPath, routeUrl, isTailscaleAddress, selfIdentity } from '../tailscale.mjs'
+
+describe('self identity', () => {
+  const status = {
+    Self: { UserID: 6481056089841494, TailscaleIPs: ['100.78.174.43', 'fd7a:115c:a1e0::e33a:ae2c'], Tags: null },
+    User: { '6481056089841494': { LoginName: 'Tali@symbolica.ai' }, '7159215974098032': { LoginName: 'tagged-devices' } },
+  }
+  it('reads the node user login (lower-cased) and its tailnet addresses', () => {
+    assert.deepEqual(selfIdentity(status), { selfLogin: 'tali@symbolica.ai', selfAddresses: ['100.78.174.43', 'fd7a:115c:a1e0::e33a:ae2c'] })
+  })
+  it('has no login for a tagged node', () => {
+    const tagged = { ...status, Self: { ...status.Self, UserID: 7159215974098032, Tags: ['tag:research'] } }
+    assert.equal(selfIdentity(tagged).selfLogin, undefined)
+    assert.equal(selfIdentity({}).selfLogin, undefined)
+    assert.deepEqual(selfIdentity(undefined).selfAddresses, [])
+  })
+})
 
 describe('state', () => {
   it('parses comma/space separated logins, lower-cased and unique', () => {

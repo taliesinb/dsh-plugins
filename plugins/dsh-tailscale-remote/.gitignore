@@ -1,0 +1,5 @@
+node_modules/
+lib/
+dock-app/build/
+*.tsbuildinfo
+.DS_Store

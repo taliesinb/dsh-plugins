@@ -13,18 +13,34 @@
  * URLs); on stock DSH the shell's `/api`, `/plugins` and WebSocket URLs escape
  * the `/dsh` mount and 404.
  *
+ * This Mac's own Dock app rides the same route: the node's own login is
+ * always admitted (Serve injects it for the node's requests to itself), so
+ * the WKWebView wrapper in dock-app/ needs no token or cookie. An always-on
+ * relay (relay/) can sit between `tailscale serve` and the proxy so the Dock
+ * app also works when DSH is not running (it starts it). Both are installed
+ * from the settings section or the pnpm scripts.
+ *
  * Node half only here; the browser half is `./client` (lib/client.js). Config:
  *   listenHost   loopback address of the proxy                     127.0.0.1
- *   listenPort   proxy port that tailscale serve points at        3083
+ *   listenPort   proxy port                                        3084
+ *   publishPort  port tailscale serve points at: the relay's port, or 0 to
+ *                publish the proxy itself                           3083
  *   mountPath    path mount on the node                           /dsh
  *   servePort    HTTPS port on the node                           443
  *   tailscalePath  CLI path override ('' = PATH / app bundle)     ''
  *   stateFile    persisted intent + token ('' = $DSH_HOME/tailscale-remote.json)
  *   cookieName   the proxy's own session cookie                   dsh-tailscale-remote
+ *   relayStart   shell command the relay runs to start DSH        pnpm dsh web --no-open
+ *   relayCwd     where it runs ('' = this process's cwd)           ''
+ *   relayLogDir  relay + DSH logs ('' = $DSH_HOME/logs)            ''
+ *   dockAppName  bundle name under ~/Applications                 DSH
+ *   dockAppGlyphColor / dockAppTileColor  icon colours            #000000 / #ffffff
  */
 import Schema from '@deepseek-ai/schemastery'
 import { renderSVG } from 'uqr'
+import { dockAppStatus, installDockApp, uninstallDockApp } from './dock-app.mjs'
 import { startProxy } from './proxy.mjs'
+import { defaultLogDir, installRelayAgent, relayStatus, uninstallRelayAgent } from './relay/launch-agent.mjs'
 import { defaultStateFile, generateToken, loadState, parseUserList, saveState } from './state.mjs'
 import { createTailscaleManager, normalizeMountPath } from './tailscale.mjs'
 
@@ -33,12 +49,19 @@ export const inject = ['webServer', 'connection']
 
 export const Config = Schema.object({
   listenHost: Schema.string().default('127.0.0.1'),
-  listenPort: Schema.natural().max(65535).default(3083),
+  listenPort: Schema.natural().max(65535).default(3084),
+  publishPort: Schema.natural().max(65535).default(3083),
   mountPath: Schema.string().default('/dsh'),
   servePort: Schema.natural().min(1).max(65535).default(443),
   tailscalePath: Schema.string().default(''),
   stateFile: Schema.string().default(''),
   cookieName: Schema.string().default('dsh-tailscale-remote'),
+  relayStart: Schema.string().default('pnpm dsh web --no-open'),
+  relayCwd: Schema.string().default(''),
+  relayLogDir: Schema.string().default(''),
+  dockAppName: Schema.string().default('DSH'),
+  dockAppGlyphColor: Schema.string().default('#000000'),
+  dockAppTileColor: Schema.string().default('#ffffff'),
 })
 
 /** RPC channel the browser half calls (`POST /tailscale-remote/<endpoint>`); the proxy refuses to forward it. */
@@ -141,18 +164,37 @@ export function apply(ctx, config) {
     return next
   }
 
+  /** What Serve publishes: the relay (publishPort) or the proxy listener itself. */
+  const publishedTarget = () => (config.publishPort !== 0 ? `http://127.0.0.1:${String(config.publishPort)}` : proxy?.url ?? '')
+  const publishedPort = () => (config.publishPort !== 0 ? config.publishPort : proxy?.port ?? config.listenPort)
+
   const tailscale = createTailscaleManager({
     configuredPath: config.tailscalePath,
     port: config.servePort,
     mountPath,
-    target: () => proxy?.url ?? '',
+    target: publishedTarget,
     log,
   })
+
+  /** Last `tailscale status` that knew this node: the proxy's identity facts (self login/addresses, public host). */
+  let lastRoute
+  const routeStatus = async () => {
+    const route = await tailscale.status()
+    if (route.dnsName !== undefined) lastRoute = route
+    return route
+  }
+  const publicHosts = () => {
+    const hosts = []
+    if (lastRoute?.dnsName !== undefined) hosts.push(lastRoute.dnsName, `${lastRoute.dnsName}:${String(config.servePort)}`)
+    if (config.publishPort !== 0) hosts.push(`127.0.0.1:${String(config.publishPort)}`, `localhost:${String(config.publishPort)}`)
+    return hosts
+  }
 
   const persist = () => saveState(stateFile, state)
 
   const ensureProxy = async () => {
     if (proxy !== undefined) return proxy
+    await routeStatus()
     proxy = await startProxy({
       listenHost: config.listenHost,
       listenPort: config.listenPort,
@@ -161,15 +203,31 @@ export function apply(ctx, config) {
       connection: ctx.connection,
       token: () => state.token,
       allowedUsers: () => state.allowedUsers,
+      selfLogin: () => lastRoute?.selfLogin,
+      selfAddresses: () => lastRoute?.selfAddresses ?? [],
+      publicHosts,
       cookieName: config.cookieName,
       controlPrefix: CONTROL_CHANNEL,
       mountPath,
       log,
       warn,
     })
-    log(`tailscale-remote: proxy ${proxy.url} -> http://127.0.0.1:${String(ctx.webServer.port)}`)
+    log(`tailscale-remote: proxy ${proxy.url} -> http://127.0.0.1:${String(ctx.webServer.port)}${config.publishPort !== 0 ? ` (published through the relay on :${String(config.publishPort)})` : ''}`)
     return proxy
   }
+
+  const relayCwd = config.relayCwd || process.cwd()
+  const relayLogDir = config.relayLogDir || defaultLogDir()
+  const relaySpec = () => ({
+    listen: `127.0.0.1:${String(config.publishPort)}`,
+    backend: `${config.listenHost}:${String(config.listenPort)}`,
+    dsh: `127.0.0.1:${String(ctx.webServer.port)}`,
+    cwd: relayCwd,
+    start: config.relayStart,
+    logDir: relayLogDir,
+  })
+  /** Where the Dock app goes when the tailnet is unreachable: the relay (or proxy) on loopback, token exchange included. */
+  const fallbackUrl = () => `http://127.0.0.1:${String(publishedPort())}/`
 
   const stopProxy = async () => {
     const current = proxy
@@ -178,9 +236,13 @@ export function apply(ctx, config) {
   }
 
   const snapshot = async () => {
-    const route = await tailscale.status()
+    const route = await routeStatus()
     const url = route.url
     const tokenUrl = url === undefined ? undefined : `${url}?${TOKEN_QUERY}=${encodeURIComponent(state.token)}`
+    const [relay, dockApp] = await Promise.all([
+      config.publishPort !== 0 ? relayStatus({ listenPort: config.publishPort }) : Promise.resolve(undefined),
+      dockAppStatus({ name: config.dockAppName, url: url ?? '' }),
+    ])
     return {
       enabled: state.enabled,
       proxyRunning: proxy !== undefined,
@@ -193,8 +255,12 @@ export function apply(ctx, config) {
       tokenUrl,
       qrSvg: tokenUrl === undefined ? undefined : qrSvg(tokenUrl),
       allowedUsers: state.allowedUsers,
+      selfLogin: route.selfLogin ?? lastRoute?.selfLogin,
       mountPath,
       servePort: config.servePort,
+      publishPort: config.publishPort,
+      relay: relay === undefined ? undefined : { ...relay, spec: relaySpec() },
+      dockApp: { ...dockApp, name: config.dockAppName, fallbackUrl: fallbackUrl() },
     }
   }
 
@@ -211,7 +277,7 @@ export function apply(ctx, config) {
     const outcome = await tailscale.enable()
     if (outcome !== 'ok') {
       await stopProxy()
-      const route = await tailscale.status()
+      const route = await routeStatus()
       const reasons = {
         'unavailable': `Tailscale is not available (${route.detail ?? 'unknown'}): is the Tailscale app running and logged in?`,
         'conflict': `${mountPath} on this node is already mapped to ${route.mappedTarget ?? 'another service'}`,
@@ -246,6 +312,56 @@ export function apply(ctx, config) {
     return ok(await snapshot())
   })
 
+  const installDock = () => exclusive(async () => {
+    const route = await routeStatus()
+    if (route.url === undefined) return fail('no-route', 'Tailscale hostname unknown: is Tailscale running and logged in?')
+    if (route.selfLogin === undefined) return fail('tagged-node', 'This node has no Tailscale user (tagged device), so its own requests would carry no identity; the Dock app would need the QR token instead.')
+    try {
+      const result = await installDockApp({
+        name: config.dockAppName,
+        url: route.url,
+        fallbackUrl: fallbackUrl(),
+        tokenFile: stateFile,
+        glyphColor: config.dockAppGlyphColor,
+        tileColor: config.dockAppTileColor,
+        log,
+      })
+      log(`tailscale-remote: Dock app installed at ${result.path} (replaced: ${result.replaced}, pinned: ${String(result.pinned)})`)
+    } catch (error) {
+      return fail('dock-app', String(error?.message ?? error))
+    }
+    return ok(await snapshot())
+  })
+
+  const uninstallDock = () => exclusive(async () => {
+    try {
+      await uninstallDockApp({ name: config.dockAppName })
+    } catch (error) {
+      return fail('dock-app', String(error?.message ?? error))
+    }
+    return ok(await snapshot())
+  })
+
+  const installRelay = () => exclusive(async () => {
+    if (config.publishPort === 0) return fail('no-relay', 'publishPort is 0: the proxy is published directly, there is no relay to install')
+    try {
+      const result = await installRelayAgent({ ...relaySpec(), log })
+      if (!result.listening) warn(`tailscale-remote: relay LaunchAgent loaded but 127.0.0.1:${String(config.publishPort)} is not answering yet — see ${relayLogDir}/relay.log`)
+    } catch (error) {
+      return fail('relay', String(error?.message ?? error))
+    }
+    return ok(await snapshot())
+  })
+
+  const uninstallRelay = () => exclusive(async () => {
+    try {
+      await uninstallRelayAgent({ log })
+    } catch (error) {
+      return fail('relay', String(error?.message ?? error))
+    }
+    return ok(await snapshot())
+  })
+
   // ---- control channel (never forwarded by the proxy) --------------------
   // Registered straight on the web server with DSH's own request gate
   // (Host/Origin fence + browser-session cookie) rather than through
@@ -263,6 +379,10 @@ export function apply(ctx, config) {
       case 'disable': return disable()
       case 'set-users': return setUsers(args.allowedUsers)
       case 'rotate-token': return rotateToken()
+      case 'install-dock-app': return installDock()
+      case 'uninstall-dock-app': return uninstallDock()
+      case 'install-relay': return installRelay()
+      case 'uninstall-relay': return uninstallRelay()
       default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
     }
   }
@@ -278,7 +398,7 @@ export function apply(ctx, config) {
     if (!state.enabled || disposed) return
     try {
       await ensureProxy()
-      const route = await tailscale.status()
+      const route = await routeStatus()
       if (route.state !== 'active') {
         const outcome = await tailscale.enable()
         if (outcome !== 'ok') warn(`tailscale-remote: persisted route could not be republished (${outcome}); the proxy stays up on ${proxy?.url ?? ''}`)

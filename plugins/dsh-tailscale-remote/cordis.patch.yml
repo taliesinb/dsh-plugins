@@ -1,7 +1,9 @@
 # Bundle patch (used when installed with `dsh plugin --profile <name> add`).
-# Defaults: proxy on 127.0.0.1:3083, route https://<node>/dsh/ (port 443),
-# state + token in $DSH_HOME/tailscale-remote.json. Override `config` in the
-# profile's cordis.patch.yml (a later layer replaces the whole value).
+# Defaults: proxy on 127.0.0.1:3084, published by `tailscale serve` through the
+# relay on 127.0.0.1:3083 (`publishPort: 0` publishes the proxy directly), route
+# https://<node>/dsh/ (port 443), state + token in $DSH_HOME/tailscale-remote.json.
+# Override `config` in the profile's cordis.patch.yml (a later layer replaces
+# the whole value).
 - insert:
     - id: tali-tailscale-remote
       name: dsh-tailscale-remote

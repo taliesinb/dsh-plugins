@@ -2,7 +2,7 @@
   "name": "dsh-tailscale-remote",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH plugin: drive the Web GUI from another device on your tailnet at https://<node>.ts.net/dsh/ \u2014 an authenticating loopback reverse proxy published with `tailscale serve`, a Tailscale-user allowlist, and a QR code carrying the access token. Needs the DSH branch fix/tailscale-mounting (document-relative Host URLs).",
+  "description": "DSH plugin: drive the Web GUI from another device on your tailnet at https://<node>.ts.net/dsh/ — an authenticating loopback reverse proxy published with `tailscale serve`, a Tailscale-user allowlist, a QR code carrying the access token, a WKWebView Dock app for this Mac (no token: the node's own Tailscale identity admits it) and an always-on relay LaunchAgent that starts DSH on demand. Needs the DSH branch fix/tailscale-mounting (document-relative Host URLs).",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -15,6 +15,13 @@
     "proxy.mjs",
     "state.mjs",
     "tailscale.mjs",
+    "dock-app.mjs",
+    "relay/relay.mjs",
+    "relay/launch-agent.mjs",
+    "scripts/cli.mjs",
+    "dock-app/Sources/main.swift",
+    "dock-app/Tools/make-icon.swift",
+    "dock-app/icon.svg",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml"
@@ -31,9 +38,16 @@
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
-    "check": "node --check index.js && node --check proxy.mjs && node --check state.mjs && node --check tailscale.mjs && node --test tests/*.test.mjs",
+    "check": "node --check index.js && node --check proxy.mjs && node --check state.mjs && node --check tailscale.mjs && node --check dock-app.mjs && node --check relay/relay.mjs && node --check relay/launch-agent.mjs && node --check scripts/cli.mjs && node --test tests/*.test.mjs",
     "test": "node --test tests/*.test.mjs",
-    "prepare": "node build.mjs"
+    "prepare": "node build.mjs",
+    "relay:install": "node scripts/cli.mjs relay:install",
+    "relay:uninstall": "node scripts/cli.mjs relay:uninstall",
+    "relay:status": "node scripts/cli.mjs relay:status",
+    "dock-app:build": "node scripts/cli.mjs dock-app:build",
+    "dock-app:install": "node scripts/cli.mjs dock-app:install",
+    "dock-app:uninstall": "node scripts/cli.mjs dock-app:uninstall",
+    "dock-app:status": "node scripts/cli.mjs dock-app:status"
   },
   "dependencies": {
     "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",

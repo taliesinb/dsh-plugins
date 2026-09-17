@@ -7,6 +7,9 @@
  *   Allowed Tailscale users: [alice@example.com, bob@example.com] [Save]
  *   QR code of the URL WITH the standing token (scanning it authenticates
  *   any device, regardless of its Tailscale user) + [Rotate token]
+ *   This Mac: your own login is always allowed; Dock app [Install/Reinstall]
+ *   (the WKWebView wrapper under ~/Applications) and the relay LaunchAgent
+ *   [Install/Remove] that starts DSH when the Dock app is opened cold.
  *
  * Talks to the host half over the plugin's own RPC channel
  * (`/tailscale-remote/<endpoint>`) through `ctx.connection.rpc`, which is
@@ -45,8 +48,38 @@ export interface RemoteStatus {
   tokenUrl?: string
   qrSvg?: string
   allowedUsers: string[]
+  /** This node's own Tailscale login (always admitted); undefined on a tagged node. */
+  selfLogin?: string
   mountPath: string
   servePort: number
+  /** Port `tailscale serve` targets; 0 = the proxy itself (no relay). Absent on an older host. */
+  publishPort?: number
+  relay?: RelayStatus
+  /** Absent on a host half older than this bundle. */
+  dockApp?: DockAppStatus
+}
+
+export interface RelayStatus {
+  supported: boolean
+  installed: boolean
+  loaded: boolean
+  pid?: number
+  listening: boolean
+  plist: string
+  logDir?: string
+  command?: string
+  spec: { listen: string; backend: string; dsh: string; cwd: string; start: string; logDir: string }
+}
+
+export interface DockAppStatus {
+  supported: boolean
+  name: string
+  path: string
+  kind: 'none' | 'wrapper' | 'safari-webapp' | 'other'
+  url?: string
+  current: boolean
+  toolchain: boolean
+  fallbackUrl: string
 }
 
 export interface RemoteApi {
@@ -55,6 +88,10 @@ export interface RemoteApi {
   disable(): Promise<RemoteStatus>
   setUsers(list: string): Promise<RemoteStatus>
   rotateToken(): Promise<RemoteStatus>
+  installDockApp(): Promise<RemoteStatus>
+  uninstallDockApp(): Promise<RemoteStatus>
+  installRelay(): Promise<RemoteStatus>
+  uninstallRelay(): Promise<RemoteStatus>
 }
 
 const CHANNEL = '/tailscale-remote'
@@ -80,6 +117,10 @@ function createApi(rpc: ClientConnectionRpc): RemoteApi {
     disable: () => call('disable'),
     setUsers: list => call('set-users', { allowedUsers: list }),
     rotateToken: () => call('rotate-token'),
+    installDockApp: () => call('install-dock-app'),
+    uninstallDockApp: () => call('uninstall-dock-app'),
+    installRelay: () => call('install-relay'),
+    uninstallRelay: () => call('uninstall-relay'),
   }
 }
 
@@ -115,6 +156,27 @@ const styles = {
   error: { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-state-error-primary)' } as CSSProperties,
   dot: (color: string): CSSProperties => ({ display: 'inline-block', width: 8, height: 8, borderRadius: 4, background: color, marginRight: 8, verticalAlign: 'middle' }),
   qr: { width: 200, height: 200, borderRadius: 12, overflow: 'hidden', background: '#fff', border: '0.5px solid var(--dsw-alias-border-l4)' } as CSSProperties,
+  mono: { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 } as CSSProperties,
+  sub: { fontSize: 13, lineHeight: '20px', color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))' } as CSSProperties,
+}
+
+function describeDockApp(dock: DockAppStatus, url: string | undefined): { color: string; text: string; action: 'install' | 'reinstall' | 'replace' | undefined } {
+  if (!dock.supported) return { color: 'var(--dsw-alias-label-tertiary)', text: 'Dock app: macOS only', action: undefined }
+  if (!dock.toolchain) return { color: '#e5a50a', text: 'Dock app: needs the Xcode Command Line Tools (xcode-select --install)', action: undefined }
+  if (dock.kind === 'wrapper' && dock.current) return { color: '#3ba55c', text: `Dock app installed — ${dock.path}`, action: 'reinstall' }
+  if (dock.kind === 'wrapper') return { color: '#e5a50a', text: `Dock app points at ${dock.url ?? 'an unknown address'}, not ${url ?? 'the current route'}`, action: 'reinstall' }
+  if (dock.kind === 'safari-webapp') return { color: '#e5a50a', text: `${dock.path} is a Safari web app for ${dock.url ?? '?'} — it signs in with a 30-day cookie it cannot renew`, action: 'replace' }
+  if (dock.kind === 'other') return { color: '#d0342c', text: `${dock.path} exists and is not a DSH app — change dockAppName or remove it`, action: undefined }
+  return { color: 'var(--dsw-alias-label-tertiary)', text: 'Dock app not installed', action: 'install' }
+}
+
+function describeRelay(relay: RelayStatus, enabled: boolean): { color: string; text: string } {
+  if (!relay.supported) return { color: 'var(--dsw-alias-label-tertiary)', text: 'Relay: macOS only' }
+  if (relay.loaded && relay.listening) return { color: '#3ba55c', text: `Relay running (pid ${String(relay.pid ?? '?')}) on ${relay.spec.listen}` }
+  if (relay.loaded) return { color: '#e5a50a', text: `Relay LaunchAgent loaded but ${relay.spec.listen} is not answering — see ${relay.logDir ?? ''}/relay.log` }
+  if (relay.listening) return { color: '#e5a50a', text: `Something else listens on ${relay.spec.listen} (an older proxy config?) — the relay is not installed` }
+  if (relay.installed) return { color: '#e5a50a', text: 'Relay LaunchAgent written but not loaded' }
+  return { color: enabled ? '#e5a50a' : 'var(--dsw-alias-label-tertiary)', text: enabled ? `Relay not installed: tailscale serve targets ${relay.spec.listen} but nothing answers there` : 'Relay not installed' }
 }
 
 function describeRoute(status: RemoteStatus): { color: string; text: string } {
@@ -274,6 +336,65 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
           </div>
         </div>
       </div>
+
+      {status.dockApp !== undefined && <div style={styles.group}>
+        <div style={styles.title}>This Mac</div>
+        <div style={styles.caption}>
+          {status.selfLogin === undefined
+            ? 'This node has no Tailscale user (tagged device): its own requests carry no identity, so the Dock app would need the QR token.'
+            : <>Your own login <code>{status.selfLogin}</code> is always allowed: requests this Mac makes to {status.url ?? 'the tailnet address'} are signed in by Tailscale itself — no token, no cookie, nothing to expire.</>}
+        </div>
+        {(() => {
+          const dockApp = status.dockApp
+          const dock = describeDockApp(dockApp, status.url)
+          return (
+            <>
+              <div style={styles.row}>
+                <div style={{ ...styles.sub, flex: 1 }}>
+                  <span style={styles.dot(dock.color)} />
+                  {dock.text}
+                </div>
+                {dock.action !== undefined && (
+                  <Button variant={dock.action === 'reinstall' ? 'outline' : 'primary'} size="sm" disabled={busy || status.url === undefined} onClick={() => { void run(api.installDockApp) }}>
+                    {busy ? 'Working…' : dock.action === 'install' ? 'Install Dock app' : dock.action === 'replace' ? 'Replace with Dock app' : 'Reinstall Dock app'}
+                  </Button>
+                )}
+                {dockApp.kind === 'wrapper' && (
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallDockApp) }}>Remove</Button>
+                )}
+              </div>
+              <div style={styles.caption}>
+                A small native app (<span style={styles.mono}>{dockApp.name}.app</span>, WKWebView) that opens {status.url ?? 'the tailnet address'} and falls back to <span style={styles.mono}>{dockApp.fallbackUrl}</span> with the token when Tailscale is off.
+                Links leaving DSH open in your browser. Building it compiles with <span style={styles.mono}>swiftc</span> (a few seconds the first time).
+              </div>
+            </>
+          )
+        })()}
+        {status.relay !== undefined && (() => {
+          const relay = describeRelay(status.relay, status.enabled)
+          return (
+            <>
+              <div style={styles.row}>
+                <div style={{ ...styles.sub, flex: 1 }}>
+                  <span style={styles.dot(relay.color)} />
+                  {relay.text}
+                </div>
+                <Button variant={status.relay.loaded ? 'outline' : 'primary'} size="sm" disabled={busy} onClick={() => { void run(api.installRelay) }}>
+                  {busy ? 'Working…' : status.relay.loaded ? 'Reinstall relay' : 'Install relay'}
+                </Button>
+                {status.relay.installed && (
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallRelay) }}>Remove</Button>
+                )}
+              </div>
+              <div style={styles.caption}>
+                A LaunchAgent that always answers {status.relay.spec.listen} (what <code>tailscale serve</code> targets) and relays to the proxy on {status.relay.spec.backend}.
+                When DSH is not running it runs <span style={styles.mono}>{status.relay.spec.start}</span> in <span style={styles.mono}>{status.relay.spec.cwd}</span> and shows a “starting” page until it answers; logs in <span style={styles.mono}>{status.relay.spec.logDir}</span>.
+                Restart both with <span style={styles.mono}>launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay</span>.
+              </div>
+            </>
+          )
+        })()}
+      </div>}
     </div>
   )
 }

@@ -9,6 +9,14 @@ route feature of the `dsh-full-remote` fork described in
 [`cloudflare-remote-control.md`](cloudflare-remote-control.md) — that fork
 stays as reference; this is the one-feature replacement.
 
+> **2026-09-17 update** — see [`dock-app-via-tailnet.md`](dock-app-via-tailnet.md):
+> the proxy now listens on **3084** and `tailscale serve /dsh` targets the
+> always-on relay on **3083** (`publishPort`); this node's own login is
+> admitted implicitly (no allowlist entry needed) and a WKWebView Dock app
+> replaces Safari's web app. The "No `Tailscale-User-*` for a self-probe"
+> fact below was observed while the node was *tagged*; untagged, Serve does
+> inject the node's own login for its requests to itself.
+
 ## Why a from-scratch plugin and a DSH patch
 
 - `dsh-full-remote` (fork `~/github/dsh-full-remote`, branch `tali/main`) grew
