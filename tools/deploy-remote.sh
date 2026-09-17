@@ -113,6 +113,18 @@ log "syncing dsh-tailscale-remote (runtime files; deps resolved against the sync
 "${SSH[@]}" 'mkdir -p dsh/plugins/dsh-tailscale-remote/node_modules'
 "${RSYNC[@]}" -aL --delete "$PLUGIN_SRC/node_modules/uqr/" "$TARGET:dsh/plugins/dsh-tailscale-remote/node_modules/uqr/"
 
+# Local-model plugins (plain ESM, node: imports only) and the user preset the
+# Apple route relies on: the supervisor starts `afm --port 9997` on first use
+# of the `apple` provider (afm must be installed on the host: `brew install
+# scouzi1966/afm/afm`), enforce-model-preset switches blank sessions on that
+# provider to the tool-less preset so a 4K on-device model gets a usable window.
+log "syncing local-model-supervisor, enforce-model-preset, minimal-no-tools preset"
+for P in local-model-supervisor enforce-model-preset; do
+  "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
+done
+"${SSH[@]}" 'mkdir -p ~/.dsh/.agent-presets'
+"${RSYNC[@]}" -a --delete --stats "$HOME/.dsh/.agent-presets/minimal-no-tools/" "$TARGET:.dsh/.agent-presets/minimal-no-tools/" | grep -E 'files transferred' | sed 's/^/  preset: /'
+
 # ---------------------------------------------------------------------------
 log "configuring DSH home, tailscale-remote state, LaunchAgent"
 if [ "$CREDENTIALS" = 1 ] || ! "${SSH[@]}" "test -f ~/.dsh/.credentials.yaml"; then
@@ -144,6 +156,26 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         # a headless host): the plugin re-points \`tailscale serve\` at its own
         # port on every boot, so a DSH restart never leaves Serve at a dead port.
         publishPort: 0
+    - id: tali-enforce-model-preset
+      name: '$HOME/dsh/plugins/enforce-model-preset/index.js'
+      config:
+        rules:
+          - provider: apple
+            preset: minimal-no-tools
+          - provider: '*'
+            preset: standard
+    - id: tali-local-model-supervisor
+      name: '$HOME/dsh/plugins/local-model-supervisor/index.js'
+      config:
+        servers:
+          - id: afm
+            providers: [apple]
+            command: afm
+            args: ['--port', '9997']
+            healthUrl: http://127.0.0.1:9997/v1/models
+            idleMinutes: 15
+            startupTimeoutMs: 90000
+            logFile: $HOME/dsh/logs/afm.log
 YML
 
 # Standing token + allowlist: created once, kept across deploys (the local
