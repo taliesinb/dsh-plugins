@@ -99,6 +99,12 @@ export async function controlRoute(req, res, connection, dispatch) {
   } catch (error) {
     result = { ok: false, error: { code: 'remote-workspaces/internal', message: String(error?.message ?? error), details: {} } }
   }
+  // The client's envelope parser requires `error.details` to be an object;
+  // errors forwarded from a remote or hand-built without one would otherwise
+  // surface as "invalid server-response failure" and hide the real message.
+  if (result?.ok === false && (typeof result.error?.details !== 'object' || result.error.details === null)) {
+    result = { ok: false, error: { ...result.error, details: {} } }
+  }
   res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
   res.end(JSON.stringify({ type: 'server-response', rpcId: message.rpcId, result }))
 }
@@ -633,7 +639,12 @@ export function apply(ctx, config) {
       const listed = await localCall('session', 'list', { _request: {} })
       const row = listed.ok ? (listed.value.items ?? []).find(item => item.sessionId === sessionId) : undefined
       if (row === undefined) return fail('missing', `no local session "${String(sessionId)}"`)
-      if (row.running === true && spec.stopLive !== true) return { ok: false, error: { code: 'session/move-live', message: 'the session is running; stop it first or move with stopLive' } }
+      // A running turn, background jobs or loaded subagents all die with the
+      // agent; the wire error carries `details` (the client rejects an
+      // error envelope without an object there).
+      if (row.running === true && spec.stopLive !== true) {
+        return { ok: false, error: { code: 'session/move-live', message: 'the session is running; stop it first or move with stopLive', details: { sessionId, blockers: [{ kind: 'turn' }] } } }
+      }
       if (row.running === true) {
         const cancelled = await localCall('session', 'cancel', { request: { sessionId } })
         if (!cancelled.ok) return cancelled
@@ -642,7 +653,9 @@ export function apply(ctx, config) {
       const from = workspaceOf(source.workspaceId)
       const egress = egressOf(from.serverId)
       if (await remoteSessionLive(egress, sessionId)) {
-        if (spec.stopLive !== true) return { ok: false, error: { code: 'session/move-live', message: 'the remote session is running; stop it first or move with stopLive' } }
+        if (spec.stopLive !== true) {
+          return { ok: false, error: { code: 'session/move-live', message: 'the remote session is running; stop it first or move with stopLive', details: { sessionId, blockers: [{ kind: 'turn' }] } } }
+        }
         const cancelled = await egress.call('session', 'cancel', { request: { sessionId } })
         if (!cancelled.ok) return cancelled
       }
