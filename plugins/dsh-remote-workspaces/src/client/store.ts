@@ -63,6 +63,22 @@ export interface RuntimeState {
 export const FRAME_HIDDEN_TTL_MS = 10 * 60 * 1000
 /** Live frames at most; each owns a WebSocket to its remote. */
 export const FRAME_CAP = 4
+/**
+ * Resolve a Host path under the served document — the fork's rule
+ * (`hostUrl` in dsh-client-connection/host-base.ts) restated here because
+ * importing it would bundle the whole connection client (+50 kB) into this
+ * plugin. A shell served at `https://h/dsh/` (the tailnet route the Dock app
+ * opens) must frame `/dsh/remote/<id>/`, not `/remote/<id>/` at the origin
+ * root, which the mount does not know and 404s.
+ * @param path - root-relative Host path such as `/remote/alpha/?embed=…`.
+ * @returns the absolute URL under the document's directory.
+ */
+export function hostPathUrl(path: string): string {
+  const directory = new URL('.', document.baseURI)
+  if (directory.origin !== location.origin) return new URL(path, `${location.origin}/`).href
+  return new URL(path.replace(/^\/+/u, ''), directory).href
+}
+
 /** Keyed main panel this plugin registers for the visible frame. */
 export const PANEL_ID = 'remote-session'
 
@@ -186,7 +202,11 @@ export class RemoteWorkspacesModel {
       if (existing === undefined) {
         d.frames.push({
           key, workspaceId: selection.workspaceId, sessionId: selection.sessionId,
-          src: `${base}?embed=${encodeURIComponent(selection.sessionId)}`, hiddenSince: null, lastShownAt: now,
+          // `localBase` is a Host path (`/remote/<id>/`); resolve it under the
+          // served document like every other Host URL, so a shell mounted at
+          // `/dsh/` (the tailnet route the Dock app opens) frames
+          // `/dsh/remote/<id>/` and not a 404 at the origin root.
+          src: hostPathUrl(`${base}?embed=${encodeURIComponent(selection.sessionId)}`), hiddenSince: null, lastShownAt: now,
         })
       } else {
         existing.hiddenSince = null
