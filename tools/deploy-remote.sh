@@ -140,6 +140,10 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
       name: '$PLUGIN/index.js'
       config:
         tailscalePath: /Applications/Tailscale.app/Contents/MacOS/Tailscale
+        # Publish the proxy listener itself (no relay LaunchAgent to manage on
+        # a headless host): the plugin re-points \`tailscale serve\` at its own
+        # port on every boot, so a DSH restart never leaves Serve at a dead port.
+        publishPort: 0
 YML
 
 # Standing token + allowlist: created once, kept across deploys (the local
