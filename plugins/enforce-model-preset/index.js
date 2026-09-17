@@ -34,7 +34,7 @@
 
 export const name = 'enforce-model-preset'
 
-export const inject = ['agents', 'agentPresets', 'sessionProjections']
+export const inject = ['agents', 'agentPresets', 'sessionProjections', 'agentDefaultModel']
 
 /**
  * Validate one rule shape, failing plugin load loudly on misconfiguration.
@@ -74,7 +74,7 @@ export function apply(ctx, config) {
     && (rule.model === undefined || rule.model === '*' || rule.model === selection.model))
 
   /** Switch one blank session to the rule's preset; refusals are normal. */
-  async function enforce(session, selection, rule) {
+  async function enforce(session, selection, rule, knownAgent) {
     let current
     try {
       current = ctx.sessionProjections.stateOf(session, 'agentPreset')
@@ -82,7 +82,7 @@ export function apply(ctx, config) {
       return // projection absent: roster not mounted for this session shape
     }
     if (current === rule.preset) return
-    const agent = ctx.agents.get(session.id)
+    const agent = knownAgent ?? ctx.agents.get(session.id)
     if (agent === undefined) return // no live agent (e.g. cold log replay)
     try {
       await ctx.agentPresets.select(agent, rule.preset)
@@ -102,6 +102,29 @@ export function apply(ctx, config) {
       )
     }
   }
+
+  // A session that never picks a model runs on the deployment default, and
+  // that default may be a mapped provider (the picker "remembers" Apple
+  // Foundation by making it the default): no `model/selection` event ever
+  // fires. Enforce at agent creation on the effective default; a later
+  // explicit selection re-enforces through the event path below.
+  ctx.on('agent/created', ({ agent }) => {
+    const session = agent.session
+    if ((session.header?.delegationDepth ?? 0) > 0) return
+    if (session.seq !== 0) return // resumed or seeded: composition is fixed
+    let selection
+    try {
+      selection = ctx.agentDefaultModel.currentSelection()
+    } catch {
+      return
+    }
+    if (typeof selection?.provider !== 'string' || typeof selection?.model !== 'string') return
+    const rule = match(selection)
+    if (rule === undefined) return
+    void enforce(session, selection, rule, agent).catch((error) => {
+      ctx.logger.warn(`enforce-model-preset: enforcement at creation failed: ${String(error)}`)
+    })
+  })
 
   ctx.on('session/event', (session, event) => {
     if (event.type !== 'model/selection') return

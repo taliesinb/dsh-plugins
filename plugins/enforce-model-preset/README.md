@@ -41,3 +41,13 @@ rules:                       # first match wins, checked in order
   model selection — this is an *enforce* plugin.
 - Services used: `agents` (live agent lookup), `agentPresets` (`select`),
   `sessionProjections` (`agentPreset` state; skip when already on target).
+
+## Default-model sessions
+
+A session that never picks a model runs on the deployment default
+(`agent-default-model`), and the picker "remembers" a choice by making it the
+default — so no `model/selection` event fires for such sessions. The plugin
+therefore also enforces at `agent/created` for fresh top-level sessions,
+using `ctx.agentDefaultModel.currentSelection()`; an explicit selection later
+re-enforces through the event path. (Found on alpha: Apple Foundation as the
+default left a blank session on `standard`, 8K of tool schemas on the wire.)
