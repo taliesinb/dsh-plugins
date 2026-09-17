@@ -1018,8 +1018,8 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
           <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
             <input type="checkbox" checked={stopLive} disabled={pending} onChange={(event) => { setStopLive(event.currentTarget.checked) }} style={{ marginTop: 2 }} />
             <span>
-              Stop the running session and move it
-              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>It is active right now; moving closes it, and it resumes cold at the destination.</div>
+              Interrupt the current turn and move it
+              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>The agent is mid-turn; moving aborts that turn (everything finished so far is in the log) and it picks up at the destination.</div>
             </span>
           </label>
         )}
