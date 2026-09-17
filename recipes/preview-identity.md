@@ -53,8 +53,12 @@ Load it **only** in the dev overlay (`cordis.dev.yml`), never the live profile.
 
 ## Gotcha that surfaced: dev overlay vs live profile collision
 
-The preview runs `--patch cordis.dev.yml` **against the live home** (no
-`DSH_HOME`), so its composition is: profile bundles + `~/.dsh/profiles/web/cordis.patch.yml`
+> Since 2026-09-17 the preview runs against `~/.dsh-preview`, whose profile
+> patch holds only `tali-tailscale-remote`; the collision rule below now
+> applies to *that* file, and the ownership table is historical.
+
+The preview used to run `--patch cordis.dev.yml` **against the live home** (no
+`DSH_HOME`), so its composition was: profile bundles + `~/.dsh/profiles/web/cordis.patch.yml`
 + the overlay. When a plugin is installed in the live profile AND listed in the
 overlay under the same id, the boot fails:
 

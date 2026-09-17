@@ -102,12 +102,15 @@ generated API in `docs/cordis-api/`):
 
    ```sh
    cd <dsh-src>
-   pnpm dsh web --patch <plugins>/cordis.dev.yml
+   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <plugins>/cordis.dev.yml --port 3088 --no-open
+   # (what the preview relay runs for you; see PREVIEWING.md)
    ```
 
    The overlay `insert`s rows whose `name` is an **absolute path** to the
    plugin entry module. Tutorial: `docs/user/develop/basic/index.md`.
-   Verify composition without booting: `pnpm dsh web --dump-config --patch ...`.
+   Verify composition without booting:
+   `DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch ... --dump-config`
+   (global options before the profile's own; `dsh web --patch` is rejected).
 
 2. **Installed bundle** (stable plugins): the package declares
    `dsh.bundle.patch` in package.json (see any `plugins/*/cordis.patch.yml`)
@@ -213,15 +216,23 @@ export function apply(ctx: Context) {
 ### Dev loop for client plugins
 
 ```sh
-cd <plugins>/plugins/<plugin> && pnpm watch   # rebuilds lib/client.js on save
-cd <dsh-src> && pnpm dsh web --patch <plugins>/cordis.dev.yml
+cd <plugins>/plugins/<plugin> && pnpm watch   # rebuilds lib/client.js on save (hot-swaps the preview GUI)
+# row in <plugins>/cordis.dev.yml, then (re)start the standing preview:
+launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview
 ```
 
-### The preview server (isolated sandbox)
+### The preview server
 
-Trial plugins in a second `dsh web` instance against a throwaway `DSH_HOME` —
-never by patching the user's live config. Command, credential forwarding,
-tokened-URL and HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
+Trial plugins in the **standing preview instance** — `DSH_HOME=~/.dsh-preview`,
+port 3088, composed from that home's profile patch plus `cordis.dev.yml`,
+started on demand by the relay LaunchAgent
+`io.github.taliesinb.dsh-web-relay.preview`, reachable token-free from any
+browser on this Mac at `https://tali-macbook-air.tailbce956.ts.net/dsh-preview/`
+and by the user as **DSH Preview** in the Dock — never by patching the live
+config. Add rows to `cordis.dev.yml`, then
+`launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`.
+Full procedure, the ad-hoc `/tmp`-home alternative, credential forwarding and
+HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
 
 ### Verifying a client change without a GUI login
 
