@@ -561,10 +561,10 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
       <div style={{ ...S.sectionHeader, ...NO_SELECT }}>
         <span style={S.sectionLabel}>Remotes</span>
         <span style={{ flex: '1 1 auto' }} />
-        <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
         <IconButton label="Refresh all remotes" disabled={anyPolling || (workspaces?.length ?? 0) === 0} onClick={() => { model.pollAll() }}>
           {anyPolling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
         </IconButton>
+        <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
         <IconButton label="Add remote workspace" onClick={() => { model.setAddOpen(true) }}>
           <IconProjectAddOutline16 size={16} />
           <span style={S.badge}><IconGlobeOutline14 size={9} /></span>
