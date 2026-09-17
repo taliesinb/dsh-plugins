@@ -208,9 +208,29 @@ for i in $(seq 1 40); do
 done
 [ "$code" = "401" ] || { echo "  server did not come up (last HTTP $code); tail of log:"; tail -20 "$HOME/dsh/logs/dsh.log"; exit 1; }
 echo "  DSH listening on 127.0.0.1:$PORT"
+TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+
+# Dock app for the host's own user (WKWebView wrapper, built with the host's
+# Swift toolchain by the plugin itself): (re)install so it tracks this build,
+# and allowlist the host's own tailnet login so the app is admitted by
+# identity too. Control actions are accepted on DSH's own port only, with the
+# launch-token cookie from the log.
+if xcrun --find swiftc >/dev/null 2>&1; then
+  LAUNCH="$(grep -o 'token=[^ ]*' "$HOME/dsh/logs/dsh.log" | tail -1)"
+  CJ="$(mktemp)"
+  curl -s -c "$CJ" -o /dev/null "http://127.0.0.1:$PORT/?$LAUNCH"
+  ctl() { curl -s -b "$CJ" -H 'content-type: application/json' -H "origin: http://127.0.0.1:$PORT" \
+    --data "{\"type\":\"client-request\",\"rpcId\":\"deploy\",\"method\":\"$1\",\"payload\":{\"args\":$2}}" "http://127.0.0.1:$PORT/tailscale-remote/$1"; }
+  SELF_LOGIN="$("$TS" status --self --json 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s);const u=j.User?.[j.Self.UserID];process.stdout.write(u?.LoginName??"")})')"
+  USERS="$("$NODE" -e 'const st=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const set=new Set(st.allowedUsers);if(process.argv[2])set.add(process.argv[2]);process.stdout.write([...set].join(", "))' "$STATE" "$SELF_LOGIN")"
+  ctl set-users "{\"allowedUsers\":\"$USERS\"}" >/dev/null && echo "  allowed users: $USERS"
+  if ctl install-dock-app '{}' | grep -q '"ok":true'; then echo "  Dock app: ~/Applications/DSH.app (re)installed and launched"; else echo "  Dock app: install failed (see ~/dsh/logs/dsh.log)"; fi
+  rm -f "$CJ"
+else
+  echo "  Dock app: skipped (no Swift toolchain: xcode-select --install)"
+fi
 
 # The plugin republishes the route on boot; give it a moment, then report.
-TS=/Applications/Tailscale.app/Contents/MacOS/Tailscale
 for i in $(seq 1 20); do "$TS" serve status 2>/dev/null | grep -q '/dsh' && break; sleep 1; done
 DNS="$("$TS" status --self --json 2>/dev/null | "$NODE" -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{process.stdout.write(JSON.parse(s).Self.DNSName.replace(/\.$/,""))})')"
 TOKEN="$("$NODE" -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).token)' "$STATE")"
