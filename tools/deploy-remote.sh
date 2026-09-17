@@ -158,8 +158,8 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         # a headless host): the plugin re-points \`tailscale serve\` at its own
         # port on every boot, so a DSH restart never leaves Serve at a dead port.
         publishPort: 0
-# Sessions on the on-device default model would otherwise be titled by that
-# model ("i am a new session" → "New session"); pin the titler to a capable route.
+# Titles come out as slugs (foo-bar-baz), matching the hand-typed `slug:`
+# convention; the on-device model is fine for that shape, so no pinned route.
 - id: session-title-llm
   config:                       # replaces the bundle row's config wholesale
     targetWords: 5
@@ -167,8 +167,7 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
     maxInputBytes: 4096
     maxOutputTokens: 64
     timeoutMs: 60000
-    provider: anthropic
-    model: claude-fable-5-1
+    style: slug
 - insert:
     - id: tali-session-title-slug
       name: '$HOME/dsh/plugins/session-title-slug/index.js'

@@ -114,3 +114,17 @@ Isolated preview home, workspace `/tmp/tdsn-scratch`:
   `ghost-check` row under the header; clicking it restores the draft and the
   real row; clearing the draft and leaving → no ghost; a plain draft → dimmed
   `New Session` ghost.
+
+## Host half (2026-09-17)
+
+`index.js` is no longer a no-op: on the first human prompt of a session it
+parses the same `slug: ` grammar and calls `ctx.sessionTitle.rename(session,
+slug)` right away. That writes a `user`-source title, which the title service
+treats as pinned — the pending automatic (LLM) generation is superseded, so no
+model is asked to summarize a prompt the user already named. It runs on the
+host, so it also covers clients that do not load this browser half (a remote
+shell framing one of this host's sessions). The browser half keeps the live
+preview in the New Session row; its later rename is a same-text no-op.
+
+Pair with `style: slug` on the `session-title-llm` row of the fork so
+unslugged prompts get `foo-bar-baz` titles too.
