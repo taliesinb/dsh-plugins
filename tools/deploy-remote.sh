@@ -158,7 +158,7 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         # a headless host): the plugin re-points \`tailscale serve\` at its own
         # port on every boot, so a DSH restart never leaves Serve at a dead port.
         publishPort: 0
-# Titles come out as slugs (foo-bar-baz), matching the hand-typed `slug:`
+# Titles come out as slugs (foo-bar-baz), matching the hand-typed slug:
 # convention; the on-device model is fine for that shape, so no pinned route.
 - id: session-title-llm
   config:                       # replaces the bundle row's config wholesale
