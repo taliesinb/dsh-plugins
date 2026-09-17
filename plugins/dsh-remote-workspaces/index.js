@@ -388,10 +388,14 @@ export function apply(ctx, config) {
     const byId = new Map((listed.items ?? []).map(item => [item.sessionId, item]))
     const visible = view.sessionIds.filter(id => byId.has(id) && !archived.has(id) && byId.get(id).blank !== true)
     const sessions = applySessionOrder(visible, workspace.sessionOrder).map(id => sessionRow(byId.get(id), view.sessionIds.indexOf(id)))
+    // Blank sessions (no turn yet) are not rows, but the browser needs their
+    // ids: a blank session with a persisted draft gets a dimmed "ghost" row so
+    // the draft stays reachable after switching away (local-tree parity).
+    const blankIds = view.sessionIds.filter(id => byId.has(id) && !archived.has(id) && byId.get(id).blank === true)
     workspace.remotePath = view.path
     workspace.remoteTitle = view.title
     workspace.remoteCreatedAt = view.createdAt
-    workspace.cache = { sessions, polledAt: new Date().toISOString() }
+    workspace.cache = { sessions, blankIds, polledAt: new Date().toISOString() }
     const server = state.servers.find(candidate => candidate.id === workspace.serverId)
     if (server !== undefined) server.lastUsedAt = workspace.cache.polledAt
     await persist()

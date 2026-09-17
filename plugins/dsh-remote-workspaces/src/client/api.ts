@@ -49,7 +49,13 @@ export interface RemoteWorkspace {
   createdAt: string
   order: number
   sessionOrder?: string[]
-  cache: { sessions: CachedSession[]; polledAt?: string; gone?: boolean }
+  cache: {
+    sessions: CachedSession[]
+    /** Blank (no turn yet) sessions of the workspace; a persisted draft makes one a ghost row. */
+    blankIds?: string[]
+    polledAt?: string
+    gone?: boolean
+  }
   server?: { id: string; label: string; localBase: string }
 }
 

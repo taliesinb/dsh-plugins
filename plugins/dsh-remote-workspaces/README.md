@@ -123,7 +123,15 @@ the slug live: the frame is same-origin, so `useFramedSlugPreview` reads the
 framed composer's text every 300 ms and parses it with the convention the
 local `session-title-slug` plugin publishes on
 `globalThis.__DSH_SESSION_TITLE_SLUG__` (no plugin locally → no preview,
-like local rows). The `slug: prompt` naming itself is done by the remote's own shell (the
+like local rows). A framed blank session whose persisted draft is non-empty keeps a dimmed
+"ghost" row after you switch away (parity with the slug plugin's local ghost
+rows): the poll records the workspace's blank session ids
+(`cache.blankIds`), and `useDraftGhosts` reads each one's draft from this
+origin's localStorage (`embed:<id>:dsh.conversation.<id>` — the framed page
+namespaces its stores per embedded session), labelling the row with the
+draft's slug or "New session"; clicking it re-selects the frame. Row
+highlight follows `remoteActive`, so a remote row is not shown selected
+while a local session is on screen. The `slug: prompt` naming itself is done by the remote's own shell (the
 `session-title-slug` client plugin must be installed *there* — the deploy
 script ships it); a remote whose sessions default to a small on-device model
 should pin its titler to a capable model or titles come out like "New

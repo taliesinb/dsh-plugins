@@ -81,6 +81,7 @@ function normalizeWorkspace(raw, serverIds) {
     sessionOrder: Array.isArray(raw.sessionOrder) ? raw.sessionOrder.filter(id => typeof id === 'string') : [],
     cache: {
       sessions,
+      ...(Array.isArray(cache.blankIds) ? { blankIds: cache.blankIds.filter(id => typeof id === 'string') } : {}),
       ...(typeof cache.polledAt === 'string' ? { polledAt: cache.polledAt } : {}),
       ...(cache.gone === true ? { gone: true } : {}),
     },

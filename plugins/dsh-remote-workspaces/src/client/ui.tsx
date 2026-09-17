@@ -232,6 +232,58 @@ function useFramedSlugPreview(frameKeyOf: string | undefined): string | undefine
 }
 
 // ---------------------------------------------------------------------------
+// ghost rows for framed blank sessions with a draft
+
+/** Mirror of ui-conversation's CONVERSATION_STORE_KEY; the framed page namespaces it per embedded session (page-mode.ts). */
+const CONVERSATION_STORE_KEY = 'dsh.conversation'
+
+/** The persisted composer draft of a framed remote session, read from this origin's localStorage. */
+function framedDraftOf(sessionId: string): string {
+  try {
+    const raw = localStorage.getItem(`embed:${sessionId}:${CONVERSATION_STORE_KEY}.${sessionId}`)
+    if (raw === null) return ''
+    const parsed: unknown = JSON.parse(raw)
+    const draft = typeof parsed === 'object' && parsed !== null ? (parsed as { draft?: unknown }).draft : undefined
+    return typeof draft === 'string' ? draft : ''
+  } catch {
+    return ''
+  }
+}
+
+/**
+ * Blank remote sessions of one workspace that hold a non-empty persisted
+ * draft and are not the current selection: each gets a dimmed row so the
+ * typed-into New Session stays reachable after switching away (the
+ * session-title-slug plugin does the same for local blank sessions). Drafts
+ * live in localStorage, which fires no event for same-document writes, so
+ * this polls at a modest cadence while the group is expanded.
+ */
+function useDraftGhosts(workspace: RemoteWorkspace, selected: RemoteSelection | undefined, expanded: boolean): { id: string; label: string }[] {
+  const [ghosts, setGhosts] = useState<{ id: string; label: string }[]>([])
+  const blankIds = workspace.cache.blankIds
+  useEffect(() => {
+    if (!expanded || blankIds === undefined || blankIds.length === 0) { setGhosts([]); return }
+    const convention = (globalThis as { __DSH_SESSION_TITLE_SLUG__?: { parseSlug: (text: string) => string | undefined } }).__DSH_SESSION_TITLE_SLUG__
+    let last = ''
+    const read = (): void => {
+      const next: { id: string; label: string }[] = []
+      for (const id of blankIds) {
+        if (selected?.workspaceId === workspace.id && selected.sessionId === id) continue
+        const draft = framedDraftOf(id)
+        if (draft.trim() === '') continue
+        next.push({ id, label: convention?.parseSlug(draft) ?? 'New session' })
+      }
+      const key = JSON.stringify(next)
+      if (key !== last) { last = key; setGhosts(next) }
+    }
+    read()
+    const timer = setInterval(read, 1000)
+    return () => { clearInterval(timer) }
+  }, [blankIds, expanded, selected, workspace.id])
+  return ghosts
+}
+
+// ---------------------------------------------------------------------------
 // groups
 
 function shortId(id: string): string {
@@ -240,7 +292,7 @@ function shortId(id: string): string {
 
 function SessionRow({ workspace, session, selected, busy, openRemoteSession, model, drag, order, caption, now, reorderable = true }: {
   workspace: RemoteWorkspace
-  session: RemoteWorkspace['cache']['sessions'][number] & { placeholder?: boolean }
+  session: RemoteWorkspace['cache']['sessions'][number] & { placeholder?: boolean; ghost?: string }
   selected: boolean
   busy: boolean
   drag: DragState
@@ -284,7 +336,7 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
     } finally { setPending(false) }
   }
   const time = session.placeholder === true ? '' : relativeLabel(session.updatedAt, now)
-  const previewSlug = useFramedSlugPreview(session.placeholder === true ? frameKey({ workspaceId: workspace.id, sessionId: session.id }) : undefined)
+  const previewSlug = useFramedSlugPreview(session.placeholder === true && session.ghost === undefined ? frameKey({ workspaceId: workspace.id, sessionId: session.id }) : undefined)
   const row = (
       <div
         role="treeitem"
@@ -312,9 +364,11 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
         <span style={S.slot}>{busy ? <Spinner /> : session.running === true ? <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--dsw-alias-state-business-primary)' }} /> : null}</span>
         <span style={{ ...S.sessionTitle, display: 'flex', flexDirection: 'column', gap: 1, lineHeight: '18px' }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {session.title || (session.placeholder === true && previewSlug !== undefined
-              ? previewSlug
-              : <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>)}
+            {session.title || (session.ghost !== undefined
+              ? <span style={{ opacity: 0.5 }}>{session.ghost}</span>
+              : session.placeholder === true && previewSlug !== undefined
+                ? previewSlug
+                : <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>)}
           </span>
           {caption !== undefined && <span style={{ ...S.muted, fontSize: 11, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caption}</span>}
         </span>
@@ -377,7 +431,9 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
   const reorderable = orderBy === 'manual'
   const compatible = reorderable && drag.item?.kind === 'group' && drag.item.id !== workspace.id
   const expanded = useView(state => state.expanded[workspace.id] === true)
-  const selected = useView(state => state.selected)
+  // `selected` survives a switch to a local session (the frame is kept warm
+  // for a quick return); the row highlight follows what is on screen.
+  const selected = useView(state => (state.remoteActive === true ? state.selected : undefined))
   const polling = useRuntime(state => state.polling.includes(workspace.id))
   const starting = useRuntime(state => state.starting.includes(workspace.id))
   const error = useRuntime(state => state.errors[workspace.id])
@@ -407,13 +463,16 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
   // A just-started (blank) remote session is not in the remote's visible list
   // yet; while it is the selection, pin a placeholder row like the local tree
   // pins its current blank session.
+  const ghosts = useDraftGhosts(workspace, selected, expanded)
   const sessions = useMemo(() => {
     const cached = orderSessions(workspace.cache.sessions, orderBy)
+    const head: (RemoteWorkspace['cache']['sessions'][number] & { placeholder?: boolean; ghost?: string })[] = []
     if (selected?.workspaceId === workspace.id && !cached.some(session => session.id === selected.sessionId)) {
-      return [{ id: selected.sessionId, title: '', placeholder: true }, ...cached]
+      head.push({ id: selected.sessionId, title: '', placeholder: true })
     }
-    return cached
-  }, [workspace.cache.sessions, workspace.id, selected, orderBy])
+    for (const ghost of ghosts) head.push({ id: ghost.id, title: '', placeholder: true, ghost: ghost.label })
+    return [...head, ...cached]
+  }, [workspace.cache.sessions, workspace.id, selected, orderBy, ghosts])
   void hideServerInHover
   const header = (
       <div
@@ -1118,7 +1177,7 @@ function ServerGroup({ group, server, drag, groupOrder, now, ...face }: {
 function FlatList({ workspaces, drag, now, ...face }: { workspaces: readonly RemoteWorkspace[]; drag: DragState; now: number } & Face) {
   const { model, openRemoteSession, useView, useRuntime } = face
   const orderBy = useView(state => state.orderBy ?? 'manual')
-  const selected = useView(state => state.selected)
+  const selected = useView(state => (state.remoteActive === true ? state.selected : undefined))
   const polling = useRuntime(state => state.polling)
   const rows = useMemo(() => flatten(workspaces, orderBy), [workspaces, orderBy])
   if (rows.length === 0) {
