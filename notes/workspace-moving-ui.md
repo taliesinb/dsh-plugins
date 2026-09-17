@@ -129,9 +129,23 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
 
 ## 4. Order of work
 
-1. Fork host: `relocate` + `session.move`/`moveMany` + `session/moved` + notice +
-   tests. **Unblocks the concrete migration from the tools note** (one-off script
-   calling the Remote; recipes-workspace → `tali-dash-plugins`).
+1. Fork host — **DONE 2026-09-17**, commit `0945cab815` on `feat/embed-session`.
+   Deviations from §2.1 worth knowing: no new `session/moved` event — the existing
+   `api-session/added` is an upsert on the client (`mergeSummary`), so the moved
+   summary is re-emitted with its new cwd; the workspace registry (not persistence)
+   is where the header cache lives (`forgetSessionHeader`); the projection cache
+   identity includes cwd, so a `rebind()` keeps the title across the move (without
+   it the row falls back to the directory basename until the session is opened);
+   `stopLive` works because the controller now retains `AgentHandle`s and
+   `retire()`s them; a session stored under the destination but not on its account
+   is simply attached (repairs an interrupted move). Backups land in
+   `$DSH_HOME/session-move-backups/<id>-<ts>/`. Archive is registry-global and
+   survives a move (an archived session stays hidden in the new workspace — correct,
+   but surprising when testing). RPC: `session/move` `{ request: { sessionId,
+   destination: { workspaceId } | { path, title? }, stopLive?, notify? } }`,
+   `session/moveMany` `{ request: { sessionIds, destination, … } }`.
+   **Unblocks the concrete migration from the tools note** (one-off `moveMany` call;
+   recipes-workspace → `tali-dash-plugins`) — not yet run against the live home.
 2. Fork client: contribution registry, Move/Rehome modals, cross-workspace DnD.
 3. Fork host: `export`/`import` with attachment bundling.
 4. Plugin: registry consumers on remote rows, remote destinations, relay, DnD.
