@@ -20,7 +20,7 @@ import type { Context } from '@deepseek-ai/cordis'
 // Type-only (erased at build): merges `ctx.slots` onto the Cordis Context.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
-import { Button, Input, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
@@ -50,6 +50,8 @@ export interface RemoteStatus {
   allowedUsers: string[]
   /** This node's own Tailscale login (always admitted); undefined on a tagged node. */
   selfLogin?: string
+  /** This node's tailnet addresses (IPv4 first). */
+  selfAddresses?: string[]
   mountPath: string
   servePort: number
   /** Port `tailscale serve` targets; 0 = the proxy itself (no relay). Absent on an older host. */
@@ -307,6 +309,41 @@ function Hint({ text, children, style, mono, copyText }: { text: string; childre
         </div>
       )}
     </span>
+  )
+}
+
+interface AddressVariant { label: string; url: string; note: string }
+
+/** The ways to reach this remote, most to least convenient. */
+function addressVariants(status: RemoteStatus): AddressVariant[] {
+  const mount = status.mountPath === '/' ? '/' : `${status.mountPath}/`
+  const port = status.servePort === 443 ? '' : `:${String(status.servePort)}`
+  const out: AddressVariant[] = []
+  if (status.dnsName !== undefined) {
+    out.push({ label: 'tailnet', url: `https://${status.dnsName}${port}${mount}`, note: 'Full MagicDNS name; the TLS certificate is issued for this name.' })
+    const short = status.dnsName.split('.')[0]
+    if (short !== '' && short !== status.dnsName) out.push({ label: 'short name', url: `https://${short}${port}${mount}`, note: 'MagicDNS short name — resolves on the tailnet, but the certificate names the full host, so browsers warn.' })
+  }
+  const ipv4 = (status.selfAddresses ?? []).find(address => /^\d+\.\d+\.\d+\.\d+$/.test(address))
+  if (ipv4 !== undefined) out.push({ label: 'tailnet IP', url: `https://${ipv4}${port}${mount}`, note: 'By address — same certificate warning as the short name.' })
+  const loopbackPort = status.publishPort !== undefined && status.publishPort !== 0 ? status.publishPort : undefined
+  if (loopbackPort !== undefined) out.push({ label: 'loopback', url: `http://localhost:${String(loopbackPort)}/`, note: 'The relay on this Mac, no mount prefix (Tailscale adds it only on the tailnet side). Not identity-admitted: first open it as …/?token=<token> (the QR code’s token) or from a tab that already has the proxy cookie.' })
+  return out
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      type="button"
+      aria-label="Copy"
+      style={{ ...table.iconButton, marginLeft: 6, color: copied ? '#3ba55c' : undefined }}
+      onClick={() => { void writeClipboard(text).then((ok) => { setCopied(ok); setTimeout(() => setCopied(false), 1200) }) }}
+    >
+      {copied
+        ? <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 8.5l3.2 3L13 4.5" /></svg>
+        : <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8.5" rx="1.5" /><path d="M10.5 5.5V3.5A1.5 1.5 0 0 0 9 2H4A1.5 1.5 0 0 0 2.5 3.5v5A1.5 1.5 0 0 0 4 10h1.5" /></svg>}
+    </button>
   )
 }
 
@@ -617,14 +654,13 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
   const [busy, setBusy] = useState(false)
   const [users, setUsers] = useState('')
   const [usersDirty, setUsersDirty] = useState(false)
-  const [copied, setCopied] = useState(false)
   const alive = useRef(true)
 
   const applyStatus = useCallback((next: RemoteStatus) => {
     if (!alive.current) return
     setStatus(next)
     setError(undefined)
-    if (!usersDirty) setUsers(next.allowedUsers.length > 0 ? next.allowedUsers.join(', ') : (next.selfLogin ?? ''))
+    if (!usersDirty) setUsers(next.allowedUsers.length > 0 ? next.allowedUsers.join('\n') : (next.selfLogin ?? ''))
   }, [usersDirty])
 
   const run = useCallback(async (action: () => Promise<RemoteStatus>) => {
@@ -653,12 +689,6 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
     const next = await api.setUsers(users)
     if (alive.current) setUsersDirty(false)
     return next
-  }
-
-  const copy = async () => {
-    if (status?.url === undefined) return
-    setCopied(await writeClipboard(status.url))
-    setTimeout(() => { if (alive.current) setCopied(false) }, 1500)
   }
 
   if (status === undefined) {
@@ -778,46 +808,21 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         })()}
       </div>}
       <div style={styles.group}>
-        <div style={styles.row}>
-          <div style={{ ...styles.title, flex: 1 }}>
-            Address
-            <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.']} />
-          </div>
-          <Button variant="outline" size="sm" disabled={status.url === undefined} onClick={() => { void copy() }}>
-            {copied ? 'Copied' : 'Copy'}
-          </Button>
-        </div>
-        <span style={{ ...styles.url, flex: 'none', display: 'block' }}>{status.url ?? '(Tailscale hostname unknown)'}</span>
-      </div>
-
-      <div style={styles.group}>
         <div style={styles.title}>
-          Allowed Tailscale users
+          Address
           <Info lines={[
-            'Comma-separated tailnet logins, as shown by `tailscale whois`.',
-            'A device whose verified Tailscale login is listed enters without a token; anyone else needs the QR code below.',
-            status.selfLogin === undefined ? '' : `Your own login (\`${status.selfLogin}\`) is always allowed, listed or not.`,
+            'Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.',
+            ...addressVariants(status).map(variant => `\`${variant.url}\` — ${variant.note}`),
           ]} />
         </div>
-        <div style={{ ...styles.row, flexWrap: 'nowrap' }}>
-          <Input
-            style={{ flex: '1 1 auto', minWidth: 0 }}
-            value={users}
-            placeholder="alice@example.com, bob@github"
-            spellCheck={false}
-            autoCapitalize="off"
-            onChange={(event) => {
-              setUsers(event.currentTarget.value)
-              setUsersDirty(true)
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void run(saveUsers)
-            }}
-          />
-          <Button variant="outline" size="sm" disabled={busy || !usersDirty} onClick={() => { void run(saveUsers) }}>
-            Save
-          </Button>
-        </div>
+        {addressVariants(status).map(variant => (
+          <div key={variant.label} style={{ ...styles.row, flexWrap: 'nowrap', gap: 0 }}>
+            <span style={{ ...table.muted, fontSize: 12, width: 84, flex: 'none' }}>{variant.label}</span>
+            <span style={{ ...styles.mono, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'all', color: 'var(--dsw-alias-label-primary)' }}>{variant.url}</span>
+            <CopyButton text={variant.url} />
+          </div>
+        ))}
+        {addressVariants(status).length === 0 && <span style={styles.caption}>(Tailscale hostname unknown)</span>}
       </div>
 
       <div style={styles.group}>
@@ -835,6 +840,41 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         {status.qrSvg === undefined
           ? <div style={{ ...styles.qr, display: 'grid', placeItems: 'center', color: '#888', fontSize: 12 }}>unavailable</div>
           : <div style={styles.qr} dangerouslySetInnerHTML={{ __html: status.qrSvg }} />}
+      </div>
+
+      <div style={styles.group}>
+        <div style={styles.title}>
+          Allowed Tailscale users
+          <Info lines={[
+            'One tailnet login per line, as shown by `tailscale whois`.',
+            'A device whose verified Tailscale login is listed enters without a token; anyone else needs the QR code below.',
+            status.selfLogin === undefined ? '' : `Your own login (\`${status.selfLogin}\`) is always allowed, listed or not.`,
+          ]} />
+        </div>
+        <div style={{ ...styles.row, flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+          <textarea
+            style={{
+              flex: '1 1 auto', minWidth: 0, resize: 'none', ...styles.mono, fontSize: 12, lineHeight: '18px', padding: '6px 10px', borderRadius: 8,
+              border: '0.5px solid var(--dsw-alias-border-l4)', background: 'var(--dsw-alias-bg-module-platform)', color: 'var(--dsw-alias-label-primary)', outline: 'none',
+            }}
+            rows={Math.max(1, users.split('\n').length)}
+            value={users}
+            placeholder={'alice@example.com\nbob@github'}
+            spellCheck={false}
+            autoCapitalize="off"
+            onChange={(event) => {
+              // Logins never contain spaces or commas: treat them as line breaks.
+              setUsers(event.currentTarget.value.replace(/[ ,;]+/g, '\n').replace(/\n{2,}/g, '\n'))
+              setUsersDirty(true)
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) void run(saveUsers)
+            }}
+          />
+          <Button variant="outline" size="sm" disabled={busy || !usersDirty} onClick={() => { void run(saveUsers) }}>
+            Save
+          </Button>
+        </div>
       </div>
 
     </div>

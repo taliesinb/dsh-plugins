@@ -266,6 +266,7 @@ export function apply(ctx, config) {
       qrSvg: tokenUrl === undefined ? undefined : qrSvg(tokenUrl),
       allowedUsers: state.allowedUsers,
       selfLogin: route.selfLogin ?? lastRoute?.selfLogin,
+      selfAddresses: route.selfAddresses ?? lastRoute?.selfAddresses ?? [],
       mountPath,
       servePort: config.servePort,
       publishPort: config.publishPort,
