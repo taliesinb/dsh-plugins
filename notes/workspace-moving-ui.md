@@ -187,6 +187,10 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
 
 ## 5. Follow-ups
 
+- Move blockers (`a3efd60bfa`) cover turn / background jobs / owned subagents. Plugin-held
+  agent-scoped resources (Wolfram kernel, browser windows, MCP sessions) are not
+  enumerated; a `session/move-blockers` hook plugins answer would close that.
+
 - Cross-tree DnD (local row → remote group and back).
 - Rehome for remote groups (call the remote's `session.moveMany`).
 - Export bundling of `sessionListMetadata` is unnecessary now (cache seed covers it).
