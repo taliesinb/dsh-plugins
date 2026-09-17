@@ -17,7 +17,9 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { createApi } from './api.ts'
 import { PANEL_ID, RemoteWorkspacesModel, type RemoteSelection } from './store.ts'
-import { AddRemoteModal, FramePool, RemoteSessionPanel, RemotesSection, type RemoteInjected } from './ui.tsx'
+import type { IWorkspaces } from '@deepseek-ai/dsh-api-workspace-controller/client'
+import { IconGlobeOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { AddRemoteModal, FramePool, MoveRemoteDialog, RemoteSessionPanel, RemotesSection, type RemoteInjected } from './ui.tsx'
 
 export const inject = ['slots', 'connection', 'layout']
 
@@ -35,11 +37,30 @@ export function apply(ctx: Context): void {
     }
   }
 
+  const localWorkspaces = (): readonly { workspaceId: string; title: string; path: string }[] => {
+    const workspaces = ctx.get('workspaces') as IWorkspaces | undefined
+    return workspaces?.list.getSnapshot().items.map(item => ({ workspaceId: item.workspaceId, title: item.title, path: item.path })) ?? []
+  }
+
   const injected = (): RemoteInjected => ({
     model,
     api,
     openRemoteSession,
+    localWorkspaces,
     hooks: { view: model.view, runtime: model.runtime },
+  })
+
+  // "Move to remote…" on every local session row (the shell's own "Move to…"
+  // covers local destinations); the shared dialog then lists the remotes.
+  ctx.inject(['uiWorkspace'], (scoped) => {
+    scoped.effect(() => scoped.uiWorkspace.contributeSessionMenu({
+      id: 'remote-workspaces.move-to-remote',
+      label: 'Move to remote…',
+      icon: <IconGlobeOutline14 />,
+      order: 10,
+      when: () => (model.runtime.getSnapshot().snapshot?.workspaces.length ?? 0) > 0,
+      run: (target) => { model.openMove({ sessionId: target.sessionId, title: target.title, source: { local: true } }) },
+    }), 'remote-workspaces: local session menu contribution')
   })
 
   // The "Remotes" section (its own header carries add + refresh-all; nothing
@@ -55,6 +76,7 @@ export function apply(ctx: Context): void {
   ctx.effect(() => ctx.slots.inject('shell.overlay', function* () {
     yield ctx.slots.register({ name: 'shell.overlay', id: 'remote-workspaces.frames', order: 5, inject: injected }, FramePool)
     yield ctx.slots.register({ name: 'shell.overlay', id: 'remote-workspaces.add-modal', order: 50, inject: injected }, AddRemoteModal)
+    yield ctx.slots.register({ name: 'shell.overlay', id: 'remote-workspaces.move-dialog', order: 51, inject: injected }, MoveRemoteDialog)
   }), 'remote-workspaces: overlay')
 
   void model.refresh().then(() => {

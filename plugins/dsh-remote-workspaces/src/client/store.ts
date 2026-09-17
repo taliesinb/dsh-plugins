@@ -34,6 +34,8 @@ export interface FrameEntry {
 }
 
 export interface RuntimeState {
+  /** Open "Move to…" request (remote session, or a local session heading to a remote). */
+  moveRequest?: MoveRequest | undefined
   snapshot: StatusSnapshot | undefined
   loaded: boolean
   loadError?: string
@@ -55,6 +57,16 @@ export const PANEL_ID = 'remote-session'
 
 export function frameKey(selection: RemoteSelection): string {
   return `${selection.workspaceId}:${selection.sessionId}`
+}
+
+/** What the move dialog is deciding about. */
+export interface MoveRequest {
+  sessionId: string
+  title: string
+  /** Where the session lives now. */
+  source: { local: true } | { local?: false; workspaceId: string }
+  /** Preselected destination, when the request came from a drop. */
+  destinationId?: string | undefined
 }
 
 export class RemoteWorkspacesModel {
@@ -264,6 +276,29 @@ export class RemoteWorkspacesModel {
     this.putWorkspace(workspace)
     this.view.update((d) => { d.expanded[workspace.id] = true })
     return workspace
+  }
+
+  openMove(request: MoveRequest | undefined): void {
+    this.runtime.update((d) => { d.moveRequest = request })
+  }
+
+  async moveSession(input: Parameters<RemoteApi['moveSession']>[0]): Promise<void> {
+    this.putWorkspace(await this.api.moveSession(input))
+    const from = this.workspace(input.fromWorkspaceId)
+    if (from !== undefined) await this.poll(from.id)
+    this.dropFrame(frameKey({ workspaceId: input.fromWorkspaceId, sessionId: input.sessionId }))
+    if (this.view.getSnapshot().selected?.sessionId === input.sessionId) this.clearSelection()
+  }
+
+  async transferSession(input: Parameters<RemoteApi['transferSession']>[0]): Promise<Awaited<ReturnType<RemoteApi['transferSession']>>> {
+    const result = await this.api.transferSession(input)
+    if (input.source.local !== true) {
+      this.dropFrame(frameKey({ workspaceId: input.source.workspaceId, sessionId: input.sessionId }))
+      if (this.view.getSnapshot().selected?.sessionId === input.sessionId) this.clearSelection()
+      await this.poll(input.source.workspaceId)
+    }
+    if (input.destination.local !== true) await this.poll(input.destination.workspaceId)
+    return result
   }
 
   setAddOpen(open: boolean): void {

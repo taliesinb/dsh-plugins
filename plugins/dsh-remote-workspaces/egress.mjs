@@ -366,6 +366,45 @@ export function createEgress(spec) {
     return envelope.result
   }
 
+  /**
+   * One authenticated raw HTTP request to the remote (binary routes such as
+   * `/api/session.export` and `/api/session.import`, which are not Typert
+   * Remotes). The response is handed back as the Node IncomingMessage so the
+   * caller streams it; a 401 with a token configured re-exchanges once.
+   * @param {string} method
+   * @param {string} pathAndQuery path below the remote base, e.g. `/api/session.export?sessionId=…`
+   * @param {{ body?: import('node:stream').Readable | Buffer, headers?: Record<string, string>, timeoutMs?: number }} [options]
+   * @returns {Promise<import('node:http').IncomingMessage>}
+   */
+  const fetchRaw = async (method, pathAndQuery, options = {}, { retry = true } = {}) => {
+    await ready()
+    const response = await new Promise((resolve, reject) => {
+      const headers = { host: remote.authority, accept: '*/*', ...(options.headers ?? {}) }
+      const bridged = cookieNow()
+      if (bridged !== undefined) headers.cookie = bridged
+      if (Buffer.isBuffer(options.body)) headers['content-length'] = String(options.body.byteLength)
+      const up = request({
+        hostname: remote.hostname,
+        port: remote.port,
+        method,
+        path: `${remote.basePath}${pathAndQuery}`,
+        headers,
+        timeout: options.timeoutMs ?? 10 * 60 * 1000,
+      }, resolve)
+      up.once('timeout', () => up.destroy(new Error('remote request timed out')))
+      up.once('error', reject)
+      if (options.body === undefined) up.end()
+      else if (Buffer.isBuffer(options.body)) up.end(options.body)
+      else options.body.pipe(up)
+    })
+    if (response.statusCode === 401 && retry && (spec.token?.() ?? '') !== '') {
+      response.resume()
+      await exchange()
+      return fetchRaw(method, pathAndQuery, options, { retry: false })
+    }
+    return response
+  }
+
   return {
     id: spec.id,
     remote,
@@ -373,6 +412,7 @@ export function createEgress(spec) {
     handleRequest,
     handleUpgrade,
     call,
+    fetchRaw,
     /** Force the token exchange now (probe). */
     exchange,
     status: () => ({

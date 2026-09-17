@@ -31,10 +31,19 @@ export interface RemoteInjected {
   api: RemoteApi
   /** Select a remote session and bring our main panel forward. */
   openRemoteSession: (selection: RemoteSelection) => void
+  /** Local workspaces (destinations for a remote → local move). */
+  localWorkspaces: () => readonly LocalWorkspaceView[]
   hooks: {
     view: RemoteWorkspacesModel['view']
     runtime: RemoteWorkspacesModel['runtime']
   }
+}
+
+/** The slice of a local workspace the move dialog needs. */
+export interface LocalWorkspaceView {
+  workspaceId: string
+  title: string
+  path: string
 }
 type Face = InjectFace<RemoteInjected>
 
@@ -208,11 +217,13 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
   const [pending, setPending] = useState(false)
   const items: MenuEntry[] = [
     { id: 'rename', label: 'Rename' },
+    ...(session.placeholder === true ? [] : [{ id: 'move', label: 'Move to…' }]),
     { id: 'archive', label: 'Archive', danger: true },
   ]
   const onSelect = async (id: string): Promise<void> => {
     setMenuOpen(false)
     if (id === 'rename') { setRename(session.title); setRenameError(null); return }
+    if (id === 'move') { model.openMove({ sessionId: session.id, title: session.title, source: { workspaceId: workspace.id } }); return }
     if (id === 'archive') {
       setPending(true)
       try { await model.archiveSession(workspace.id, session.id) } catch { /* the group shows the error */ } finally { setPending(false) }
@@ -794,5 +805,169 @@ export function FramePool({ useRuntime, useView, usePanelInfo, model }: PropsRun
         )
       })}
     </div>
+  )
+}
+
+
+// ---- Move dialog -------------------------------------------------------------
+
+type MoveDestination =
+  | { kind: 'local'; workspaceId: string; title: string; path: string }
+  | { kind: 'remote'; workspace: RemoteWorkspace }
+
+function destinationKey(destination: MoveDestination): string {
+  return destination.kind === 'local' ? `local:${destination.workspaceId}` : `remote:${destination.workspace.id}`
+}
+
+/**
+ * "Move to…" for a remote session (destinations: other workspaces of the same
+ * remote, other remotes, local workspaces) or for a local session heading to
+ * a remote (destinations: remotes only — local→local is the shell's own
+ * dialog). Same-remote moves use the remote's `session.move`; everything else
+ * is a cross-host transfer (export → import → archive the source copy). A
+ * `session/move-live` refusal reveals the stop-and-move option.
+ */
+export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
+  const request = useRuntime(state => state.moveRequest)
+  const snapshot = useRuntime(state => state.snapshot)
+  const [choice, setChoice] = useState<string | undefined>(undefined)
+  const [stopLive, setStopLive] = useState(false)
+  const [liveRefused, setLiveRefused] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [summary, setSummary] = useState<string | null>(null)
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => {
+    setChoice(request?.destinationId)
+    setStopLive(false)
+    setLiveRefused(false)
+    setPending(false)
+    setError(null)
+    setSummary(null)
+  }, [request])
+
+  const destinations = useMemo((): MoveDestination[] => {
+    if (request === undefined) return []
+    const remotes: MoveDestination[] = (snapshot?.workspaces ?? [])
+      .filter(workspace => request.source.local === true || workspace.id !== request.source.workspaceId)
+      .map(workspace => ({ kind: 'remote', workspace }))
+    if (request.source.local === true) return remotes
+    const locals: MoveDestination[] = localWorkspaces().map(view => ({ kind: 'local', workspaceId: view.workspaceId, title: view.title, path: view.path }))
+    return [...remotes, ...locals]
+  }, [localWorkspaces, request, snapshot])
+  const chosen = destinations.find(candidate => destinationKey(candidate) === choice)
+  const sourceWorkspace = request === undefined || request.source.local === true ? undefined : model.workspace(request.source.workspaceId)
+  const crossHost = chosen !== undefined && (chosen.kind === 'local' || sourceWorkspace === undefined || chosen.workspace.serverId !== sourceWorkspace.serverId)
+  const blocked = pending || chosen === undefined || summary !== null || (liveRefused && !stopLive)
+
+  const confirm = async (): Promise<void> => {
+    if (request === undefined || chosen === undefined || blocked) return
+    setPending(true)
+    setError(null)
+    try {
+      if (!crossHost && chosen.kind === 'remote' && request.source.local !== true) {
+        await model.moveSession({ fromWorkspaceId: request.source.workspaceId, sessionId: request.sessionId, toWorkspaceId: chosen.workspace.id, stopLive })
+        setSummary(`Moved to ${chosen.workspace.title}.`)
+      } else {
+        const result = await model.transferSession({
+          sessionId: request.sessionId,
+          source: request.source.local === true ? { local: true } : { workspaceId: request.source.workspaceId },
+          destination: chosen.kind === 'local' ? { local: true, workspaceId: chosen.workspaceId } : { workspaceId: chosen.workspace.id },
+          stopLive,
+        })
+        const where = chosen.kind === 'local' ? `${chosen.title} (this machine)` : `${chosen.workspace.title} on ${chosen.workspace.server?.label ?? chosen.workspace.serverId}`
+        const renamed = result.sessionId === request.sessionId ? '' : ` It has a new id there (${result.sessionId.slice(0, 16)}…).`
+        setSummary(`Copied to ${where} (${String(Math.round(result.bytes / 1024))} KB); the original is archived here.${renamed}`)
+      }
+    } catch (failure) {
+      const code = (failure as { code?: string }).code
+      if (code === 'session/move-live') setLiveRefused(true)
+      else setError(failure instanceof Error ? failure.message : String(failure))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  const menuItems: MenuEntry[] = []
+  let lastGroup: string | undefined
+  for (const destination of destinations) {
+    const group = destination.kind === 'local' ? 'This machine' : (destination.workspace.server?.label ?? destination.workspace.serverId)
+    if (group !== lastGroup) {
+      if (lastGroup !== undefined) menuItems.push({ type: 'separator', id: `sep:${group}` })
+      lastGroup = group
+    }
+    menuItems.push({
+      id: destinationKey(destination),
+      label: destination.kind === 'local' ? `${destination.title} · ${group}` : `${destination.workspace.title} · ${group}`,
+      icon: destination.kind === 'local' ? <IconFolderClose16 /> : <IconGlobeOutline14 />,
+    })
+  }
+  const chosenLabel = chosen === undefined
+    ? 'Choose a workspace…'
+    : chosen.kind === 'local' ? `${chosen.title} · this machine` : `${chosen.workspace.title} · ${chosen.workspace.server?.label ?? chosen.workspace.serverId}`
+
+  return (
+    <Modal
+      open={request !== undefined}
+      onClose={() => { model.openMove(undefined) }}
+      closeLabel="Close"
+      title={request?.source.local === true ? 'Move session to a remote' : 'Move remote session'}
+      footer={(
+        <>
+          <Button variant="outline" disabled={pending} onClick={() => { model.openMove(undefined) }}>{summary === null ? 'Cancel' : 'Close'}</Button>
+          {summary === null && (
+            <Button variant="primary" disabled={blocked} onClick={() => { void confirm() }}>{pending ? 'Moving…' : 'Move'}</Button>
+          )}
+        </>
+      )}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13 }}>
+        <div style={{ color: 'var(--dsw-alias-label-secondary)' }}>{request?.title}</div>
+        <div style={S.field}>
+          <span style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }}>Destination workspace</span>
+          <Menu
+            open={menuOpen}
+            onClose={() => { setMenuOpen(false) }}
+            items={menuItems.length === 0 ? [{ id: 'none', label: 'No destinations available', disabled: true }] : menuItems}
+            onSelect={(id) => { setMenuOpen(false); if (id !== 'none') setChoice(id) }}
+            portal
+            anchor={(
+              <button
+                type="button"
+                disabled={pending || summary !== null}
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                onClick={() => { setMenuOpen(value => !value) }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px', borderRadius: 20,
+                  border: '0.5px solid var(--dsw-alias-border-l4)', background: 'transparent',
+                  color: 'var(--dsw-alias-label-primary)', fontSize: 14, textAlign: 'left', cursor: 'pointer', width: '100%',
+                }}
+              >
+                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{chosenLabel}</span>
+                <span style={{ display: 'inline-flex', transform: 'rotate(90deg)' }}><IconTriangleRightFill14 /></span>
+              </button>
+            )}
+          />
+        </div>
+        {crossHost && chosen !== undefined && summary === null && (
+          <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', lineHeight: '17px' }}>
+            Different machine: the session log and its attachments are copied over and the original is archived here.
+            Files the agent worked on are not copied.
+          </div>
+        )}
+        {liveRefused && (
+          <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer' }}>
+            <input type="checkbox" checked={stopLive} disabled={pending} onChange={(event) => { setStopLive(event.currentTarget.checked) }} style={{ marginTop: 2 }} />
+            <span>
+              Stop the running session and move it
+              <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-tertiary)' }}>It is active right now; moving closes it, and it resumes cold at the destination.</div>
+            </span>
+          </label>
+        )}
+        {summary !== null && <div style={{ fontSize: 12, color: 'var(--dsw-alias-label-secondary)' }} role="status">{summary}</div>}
+        {error !== null && <div style={{ ...S.error, padding: 0 }} role="alert">{error}</div>}
+      </div>
+    </Modal>
   )
 }

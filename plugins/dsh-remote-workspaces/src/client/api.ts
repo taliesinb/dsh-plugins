@@ -82,6 +82,28 @@ export interface RemoteApi {
   renameSession(workspaceId: string, sessionId: string, title: string): Promise<RemoteWorkspace>
   archiveSession(workspaceId: string, sessionId: string): Promise<RemoteWorkspace>
   startSession(workspaceId: string): Promise<{ sessionId: string; created: boolean }>
+  /** Move a remote session to another workspace of the same remote (the remote's own `session.move`). */
+  moveSession(input: { fromWorkspaceId: string; sessionId: string; toWorkspaceId: string; stopLive?: boolean }): Promise<RemoteWorkspace>
+  /** Move a session across hosts: export at the source, import at the destination, archive the source copy. */
+  transferSession(input: TransferRequest): Promise<TransferResult>
+}
+
+/** One end of a cross-host transfer. */
+export type TransferEnd =
+  | { local: true; workspaceId?: string; path?: string }
+  | { local?: false; workspaceId: string }
+
+export interface TransferRequest {
+  sessionId: string
+  source: TransferEnd
+  destination: TransferEnd
+  stopLive?: boolean
+}
+
+export interface TransferResult {
+  sessionId: string
+  imported: { sessionId: string; exportedId: string; parentSessionId?: string }[]
+  bytes: number
 }
 
 export function createApi(rpc: ClientConnectionRpc): RemoteApi {
@@ -105,5 +127,7 @@ export function createApi(rpc: ClientConnectionRpc): RemoteApi {
     renameSession: (workspaceId, sessionId, title) => call<{ workspace: RemoteWorkspace }>('sessions.rename', { workspaceId, sessionId, title }).then(workspaceOf),
     archiveSession: (workspaceId, sessionId) => call<{ workspace: RemoteWorkspace }>('sessions.archive', { workspaceId, sessionId }).then(workspaceOf),
     startSession: workspaceId => call<{ sessionId: string; created: boolean }>('sessions.start', { workspaceId }),
+    moveSession: input => call<{ workspace: RemoteWorkspace }>('sessions.move', input).then(workspaceOf),
+    transferSession: input => call<TransferResult>('sessions.transfer', input as unknown as Record<string, unknown>),
   }
 }

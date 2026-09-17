@@ -20,6 +20,7 @@
  *   stateFile    registry ('' = $DSH_HOME/remote-workspaces.json)   ''
  *   servers[]    seed entries { id, url, label?, token? } (not persisted)
  */
+import os from 'node:os'
 import Schema from '@deepseek-ai/schemastery'
 import { createEgress, parseRemoteUrl } from './egress.mjs'
 import { defaultStateFile, generateId, loadState, normalizeState, routeIdFor, saveState } from './state.mjs'
@@ -511,6 +512,157 @@ export function apply(ctx, config) {
     return ok({ sessionId: created.sessionId, created: true })
   })
 
+  // ---- moving sessions across hosts -------------------------------------
+  //
+  // Local operations go through the local Connection's own fetch handler
+  // in-process (same code path the browser's requests take after the
+  // Host/Origin fence), so no token or cookie is involved. Remote operations
+  // go through the egress (Typert `call` for JSON, `fetchRaw` for the export
+  // and import routes' binary bodies).
+
+  const localApi = ctx.connection.createSharedFetchHandler('/api')
+  const LOCAL_ORIGIN = 'http://dsh.local'
+  /** Call a local Typert Remote in-process. */
+  const localCall = async (namespace, method, args) => {
+    const rpcId = crypto.randomUUID()
+    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/${namespace}/${method}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: 'client-request', rpcId, method: `${namespace}/${method}`, payload: { args } }),
+    }))
+    const envelope = await response.json().catch(() => undefined)
+    if (typeof envelope !== 'object' || envelope === null || typeof envelope.result !== 'object') {
+      return { ok: false, error: { code: 'remote-workspaces/bad-response', message: `local ${namespace}.${method} answered HTTP ${String(response.status)}` } }
+    }
+    return envelope.result
+  }
+  /** Read the local export ZIP of one session (with descendants) as a Buffer. */
+  const localExport = async (sessionId) => {
+    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.export?sessionId=${encodeURIComponent(sessionId)}&includeDescendants=true`))
+    if (response.status !== 200) throw new Error(`local export failed: HTTP ${String(response.status)} ${await response.text()}`)
+    return Buffer.from(await response.arrayBuffer())
+  }
+  /** Import one ZIP Buffer into a local workspace; returns the import result. */
+  const localImport = async (zip, destination, origin) => {
+    const query = 'workspaceId' in destination
+      ? `workspaceId=${encodeURIComponent(destination.workspaceId)}`
+      : `cwd=${encodeURIComponent(destination.path)}`
+    const response = await localApi.fetch(new Request(`${LOCAL_ORIGIN}/api/session.import?${query}&origin=${encodeURIComponent(origin)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/zip' },
+      body: zip,
+    }))
+    const text = await response.text()
+    if (response.status !== 200) throw new Error(`local import failed: HTTP ${String(response.status)} ${text}`)
+    return JSON.parse(text)
+  }
+  /** Read a remote session's export ZIP as a Buffer. */
+  const remoteExport = async (egress, sessionId) => {
+    const response = await egress.fetchRaw('GET', `/api/session.export?sessionId=${encodeURIComponent(sessionId)}&includeDescendants=true`)
+    const chunks = []
+    for await (const chunk of response) chunks.push(chunk)
+    if (response.statusCode !== 200) throw new Error(`remote export failed: HTTP ${String(response.statusCode)} ${Buffer.concat(chunks).toString('utf8').slice(0, 300)}`)
+    return Buffer.concat(chunks)
+  }
+  /** Import one ZIP Buffer into a remote workspace. */
+  const remoteImport = async (egress, zip, remoteWorkspaceId, origin) => {
+    const response = await egress.fetchRaw('POST',
+      `/api/session.import?workspaceId=${encodeURIComponent(remoteWorkspaceId)}&origin=${encodeURIComponent(origin)}`,
+      { body: zip, headers: { 'content-type': 'application/zip' } })
+    const chunks = []
+    for await (const chunk of response) chunks.push(chunk)
+    const text = Buffer.concat(chunks).toString('utf8')
+    if (response.statusCode !== 200) throw new Error(`remote import failed: HTTP ${String(response.statusCode)} ${text.slice(0, 300)}`)
+    return JSON.parse(text)
+  }
+  const hostLabel = () => os.hostname()
+  const remoteLabel = (serverId) => {
+    const server = state.servers.find(candidate => candidate.id === serverId)
+    return server?.label ?? serverId
+  }
+  /** Is the session resident on the given remote right now (`running` or open)? Cheap check via its list row. */
+  const remoteSessionLive = async (egress, sessionId) => {
+    const listed = await egress.call('session', 'list', { _request: {} })
+    if (!listed.ok) return false
+    const row = (listed.value.items ?? []).find(item => item.sessionId === sessionId)
+    return row?.running === true
+  }
+
+  /**
+   * Move a session between two workspaces of the same remote: the remote's
+   * own `session.move`, refusals passed through as-is (the UI answers
+   * `session/move-live` with stop-and-move).
+   */
+  const moveSessionWithinRemote = (fromWorkspaceId, sessionId, toWorkspaceId, stopLive) => exclusive(async () => {
+    const from = workspaceOf(fromWorkspaceId)
+    const to = workspaceOf(toWorkspaceId)
+    if (from.serverId !== to.serverId) return fail('cross-remote', 'use sessions.transfer for moves between different remotes')
+    const egress = egressOf(from.serverId)
+    const result = await egress.call('session', 'move', { request: {
+      sessionId: String(sessionId), destination: { workspaceId: to.remoteWorkspaceId }, stopLive: stopLive === true,
+    } })
+    if (!result.ok) return result
+    await pollWorkspace(from)
+    return pollWorkspace(to)
+  })
+
+  /**
+   * Move a session across hosts: export at the source, import at the
+   * destination, then archive the source copy (kept as a tombstone rather
+   * than deleted — the one place a bug would lose work). Source and
+   * destination are each `{ local: true, sessionId?, workspaceId? }` or
+   * `{ workspaceId: <remote workspace id> }`. A source session that is live
+   * refuses unless `stopLive`.
+   */
+  const transferSession = (spec) => exclusive(async () => {
+    const { sessionId } = spec
+    const source = spec.source
+    const destination = spec.destination
+    if (source.local === true && destination.local === true) return fail('bad-request', 'a local→local move is session.move, not a transfer')
+    // 1. Source liveness.
+    if (source.local === true) {
+      const listed = await localCall('session', 'list', { _request: {} })
+      const row = listed.ok ? (listed.value.items ?? []).find(item => item.sessionId === sessionId) : undefined
+      if (row === undefined) return fail('missing', `no local session "${String(sessionId)}"`)
+      if (row.running === true && spec.stopLive !== true) return { ok: false, error: { code: 'session/move-live', message: 'the session is running; stop it first or move with stopLive' } }
+      if (row.running === true) {
+        const cancelled = await localCall('session', 'cancel', { request: { sessionId } })
+        if (!cancelled.ok) return cancelled
+      }
+    } else {
+      const from = workspaceOf(source.workspaceId)
+      const egress = egressOf(from.serverId)
+      if (await remoteSessionLive(egress, sessionId)) {
+        if (spec.stopLive !== true) return { ok: false, error: { code: 'session/move-live', message: 'the remote session is running; stop it first or move with stopLive' } }
+        const cancelled = await egress.call('session', 'cancel', { request: { sessionId } })
+        if (!cancelled.ok) return cancelled
+      }
+    }
+    // 2. Export at the source.
+    const originLabel = source.local === true ? `${hostLabel()} (local)` : remoteLabel(workspaceOf(source.workspaceId).serverId)
+    const zip = source.local === true
+      ? await localExport(sessionId)
+      : await remoteExport(egressOf(workspaceOf(source.workspaceId).serverId), sessionId)
+    // 3. Import at the destination.
+    let imported
+    if (destination.local === true) {
+      imported = await localImport(zip, destination.workspaceId !== undefined ? { workspaceId: destination.workspaceId } : { path: destination.path }, originLabel)
+    } else {
+      const to = workspaceOf(destination.workspaceId)
+      imported = await remoteImport(egressOf(to.serverId), zip, to.remoteWorkspaceId, originLabel)
+      await pollWorkspace(to)
+    }
+    // 4. Archive the source copy (tombstone); never delete.
+    if (source.local === true) {
+      await localCall('workspace', 'archiveSession', { request: { sessionId } })
+    } else {
+      const from = workspaceOf(source.workspaceId)
+      await egressOf(from.serverId).call('workspace', 'archiveSession', { request: { sessionId } })
+      await pollWorkspace(from)
+    }
+    return ok({ sessionId: imported.sessionId, imported: imported.imported, bytes: zip.byteLength })
+  })
+
   const dispatch = async (endpoint, payload) => {
     await boot
     const args = typeof payload === 'object' && payload !== null && typeof payload.args === 'object' && payload.args !== null ? payload.args : {}
@@ -528,6 +680,8 @@ export function apply(ctx, config) {
         case 'sessions.rename': return renameSession(args.workspaceId, args.sessionId, args.title)
         case 'sessions.archive': return archiveSession(args.workspaceId, args.sessionId)
         case 'sessions.start': return startSession(args.workspaceId)
+        case 'sessions.move': return moveSessionWithinRemote(args.fromWorkspaceId, args.sessionId, args.toWorkspaceId, args.stopLive)
+        case 'sessions.transfer': return transferSession(args)
         default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
       }
     } catch (error) {

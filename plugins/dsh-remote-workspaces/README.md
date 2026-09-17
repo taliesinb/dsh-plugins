@@ -30,6 +30,30 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
   identity mode. **Later:** title sync without ↻ (postMessage from the embed),
   interleaving remote groups with local ones, remote workspace path browsing.
 
+## Moving sessions across hosts
+
+Every remote session row's `…` menu has **Move to…**; every local session row
+gains **Move to remote…** (contributed through the fork's
+`ctx.uiWorkspace.contributeSessionMenu`). One dialog serves both, listing the
+other workspaces of the same remote, the other remotes, and (for a remote
+source) the local workspaces:
+
+| source → destination | mechanism |
+|---|---|
+| remote → another workspace of the same remote | the remote's own `session.move` (`sessions.move`) |
+| remote → local, local → remote, remote A → remote B | `sessions.transfer`: export at the source (`GET /api/session.export`, ZIP with descendants + attachments), import at the destination (`POST /api/session.import`), then **archive** the source copy — never delete |
+
+Cross-host copies keep the exported id when it is free at the destination and
+mint a new one otherwise (the dialog says so); the destination's projection
+cache is seeded, so the row shows its title at once. A live source refuses
+with `session/move-live` and the dialog offers stop-and-move (which cancels
+the running turn first). Local↔local moves are the shell's own dialog, not
+this plugin's. The host relay reaches the local API in-process through
+`connection.createSharedFetchHandler('/api')` and the remote through the
+egress (`call` for JSON remotes, `fetchRaw` for the binary export/import
+routes). Not yet: dragging a local row onto a remote group (cross-tree DnD
+would need a shared dataTransfer type in the fork's rows).
+
 ## Files
 
 | File | Role |

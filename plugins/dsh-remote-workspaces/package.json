@@ -39,6 +39,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:/Users/tali/github/deepseek-harness-embed/vendor/cordis",
+    "@deepseek-ai/dsh-api-workspace-controller": "link:/Users/tali/github/deepseek-harness-embed/packages/api/workspace-controller",
     "@deepseek-ai/dsh-client-connection": "link:/Users/tali/github/deepseek-harness-embed/packages/client/connection",
     "@deepseek-ai/dsh-client-store": "link:/Users/tali/github/deepseek-harness-embed/packages/client/store",
     "@deepseek-ai/dsh-client-ui-layout": "link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-layout",

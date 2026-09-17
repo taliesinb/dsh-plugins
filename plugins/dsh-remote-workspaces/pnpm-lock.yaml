@@ -15,6 +15,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: link:/Users/tali/github/deepseek-harness-embed/vendor/cordis
         version: link:../../../deepseek-harness-embed/vendor/cordis
+      '@deepseek-ai/dsh-api-workspace-controller':
+        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/api/workspace-controller
+        version: link:../../../deepseek-harness-embed/packages/api/workspace-controller
       '@deepseek-ai/dsh-client-connection':
         specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/connection
         version: link:../../../deepseek-harness-embed/packages/client/connection
