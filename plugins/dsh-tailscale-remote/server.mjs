@@ -32,14 +32,14 @@ function header(req, name) {
 /** Short, human user-agent label. */
 export function describeUserAgent(ua) {
   const text = String(ua ?? '')
-  if (text === '') return 'unknown'
-  if (/DSHDock\//.test(text)) return 'App'
+  if (text === '') return '—'
+  if (/DSHDock\//.test(text)) return 'macOS app'
   if (/curl\//.test(text)) return 'curl'
   if (/CriOS|Chrome\//.test(text) && !/Edg\//.test(text)) return /Mobile/.test(text) ? 'Chrome mobile' : 'Chrome'
   if (/Edg\//.test(text)) return 'Edge'
   if (/Firefox\//.test(text)) return 'Firefox'
   if (/Safari\//.test(text)) return /iPhone|iPad/.test(text) ? 'iOS Safari' : 'Safari'
-  return 'other'
+  return '—'
 }
 
 /** Identity facts of one request as seen by DSH. */
@@ -208,7 +208,8 @@ export async function processTable(spec) {
     rows.push({
       id: 'relay',
       title: 'Relay',
-      details: [`LaunchAgent ${relay.label ?? ''}`, `listening on ${relay.spec.listen}`, `→ proxy ${relay.spec.backend}`, ...(facts === undefined ? [] : [facts.command])],
+      details: [`LaunchAgent ${relay.label ?? ''}`, `listening on ${relay.spec.listen}`, `→ proxy ${relay.spec.backend}`],
+      command: facts?.command,
       pid: relay.pid,
       running: relay.loaded && relay.pid !== undefined,
       uptimeSeconds: facts?.uptimeSeconds,
@@ -229,8 +230,8 @@ export async function processTable(spec) {
       `http://127.0.0.1:${String(spec.port)}/`,
       `DSH_HOME ${spec.dshHome}`,
       ...(parent === undefined ? [] : [`started by pid ${String(parent.pid)}: ${parent.command}`]),
-      ...(self === undefined ? [] : [self.command]),
     ],
+    command: self?.command,
     pid: process.pid,
     running: true,
     uptimeSeconds: Math.round(process.uptime()),
@@ -245,7 +246,8 @@ export async function processTable(spec) {
   rows.push({
     id: 'dock-app',
     title: `${spec.dockAppName}.app`,
-    details: [spec.dockAppPath, ...(dockFacts === undefined ? [] : [dockFacts.command])],
+    details: [spec.dockAppPath],
+    command: dockFacts?.command,
     pid: dockPids[0],
     running: dockPids.length > 0,
     uptimeSeconds: dockFacts?.uptimeSeconds,
@@ -264,7 +266,8 @@ export async function processTable(spec) {
       rows.push({
         id: 'afm',
         title: 'afm',
-        details: ['Apple Foundation model server', 'started on demand by local-model-supervisor', ...(facts === undefined ? [] : [facts.command])],
+        details: ['Apple Foundation model server', 'started on demand by local-model-supervisor'],
+        command: facts?.command,
         pid: afmPids[0],
         running: true,
         uptimeSeconds: facts?.uptimeSeconds,

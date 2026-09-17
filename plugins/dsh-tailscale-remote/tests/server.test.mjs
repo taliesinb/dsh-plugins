@@ -13,11 +13,11 @@ describe('server pane helpers', () => {
     assert.equal(parseEtime('garbage'), undefined)
   })
   it('labels user agents', () => {
-    assert.equal(describeUserAgent('Mozilla/5.0 (Macintosh) AppleWebKit/605 (KHTML, like Gecko) DSHDock/1.0'), 'App')
+    assert.equal(describeUserAgent('Mozilla/5.0 (Macintosh) AppleWebKit/605 (KHTML, like Gecko) DSHDock/1.0'), 'macOS app')
     assert.equal(describeUserAgent('Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit/605 Version/17.0 Mobile/15E148 Safari/604.1'), 'iOS Safari')
     assert.equal(describeUserAgent('Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Safari/537.36'), 'Chrome')
     assert.equal(describeUserAgent('curl/8.7.1'), 'curl')
-    assert.equal(describeUserAgent(undefined), 'unknown')
+    assert.equal(describeUserAgent(undefined), '—')
   })
   it('reads identity facts from the proxy headers or the socket', () => {
     const proxied = clientFacts({ headers: { 'x-dsh-tailscale-remote': '1', 'x-dsh-tailscale-remote-admitted': 'user', 'x-dsh-tailscale-remote-login': 'tali@example.com', 'x-forwarded-for': '100.1.2.3', 'x-dsh-tailscale-remote-self': '1', 'user-agent': 'DSHDock/1.0' }, socket: { remoteAddress: '127.0.0.1' } })
@@ -74,7 +74,7 @@ describe('client tracker on a live http.Server', () => {
     await new Promise(resolve => setTimeout(resolve, 20))
     let [row] = tracker.snapshot()
     assert.equal(row.login, 'tali@example.com')
-    assert.equal(row.agent, 'App')
+    assert.equal(row.agent, 'macOS app')
     assert.equal(row.requests, 2)
     assert.equal(row.lastSession.sessionId, 'session-abc')
     assert.equal(row.lastPath, '/api/settings/read')

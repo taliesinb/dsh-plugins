@@ -89,8 +89,10 @@ export interface ServerAction { id: string; label: string; note: string; danger?
 export interface ServerProcess {
   id: string
   title: string
-  /** One fact per line, shown on hover. */
+  /** One fact per line, shown on hover over the name. */
   details: string[]
+  /** Full command line, shown on hover over the PID. */
+  command?: string
   pid?: number
   running: boolean
   uptimeSeconds?: number
@@ -301,17 +303,19 @@ export function ServerSection({ api }: SectionProps) {
         <div style={styles.title}>Processes{status.instance ? ` — ${status.instance} instance` : ''}</div>
         <table style={table.table}>
           <colgroup>
-            <col style={{ width: '46%' }} />
-            <col style={{ width: '17%' }} />
+            <col style={{ width: '34%' }} />
+            <col style={{ width: 70 }} />
+            <col style={{ width: '16%' }} />
             <col style={{ width: '13%' }} />
-            <col style={{ width: '24%' }} />
+            <col />
           </colgroup>
           <thead>
             <tr>
               <th style={table.th}>Process</th>
+              <th style={table.th}>PID</th>
               <th style={table.th}>Up</th>
               <th style={table.th}>RSS</th>
-              <th style={{ ...table.th, textAlign: 'right' }}>PID</th>
+              <th style={{ ...table.th, textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -321,10 +325,10 @@ export function ServerSection({ api }: SectionProps) {
                   <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
                   {process.title}
                 </td>
+                <td style={{ ...table.td, ...styles.mono }} title={process.command ?? ''}>{process.pid ?? '—'}</td>
                 <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
                 <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
                 <td style={{ ...table.td, textAlign: 'right' }}>
-                  <span style={styles.mono}>{process.pid ?? '—'}</span>
                   {process.actions.map(action => (
                     <button
                       key={action.id}
@@ -346,7 +350,7 @@ export function ServerSection({ api }: SectionProps) {
         {message !== undefined && <div style={styles.caption}>{message}</div>}
         {error !== undefined && <div style={styles.error}>{error}</div>}
         <div style={styles.caption}>
-          Hover a process name for its details and{' '}
+          Hover a process name for its details, its PID for the full command, and{' '}
           {ICON_LEGEND.map(([id, meaning]) => (
             <span key={id} title={meaning} style={{ display: 'inline-flex', verticalAlign: 'middle', marginRight: 2 }}><ActionIcon id={id} /></span>
           ))}
@@ -369,7 +373,7 @@ export function ServerSection({ api }: SectionProps) {
           </colgroup>
           <thead>
             <tr>
-              <th style={table.th}>Who</th>
+              <th style={table.th}>User</th>
               <th style={table.th}>IP</th>
               <th style={table.th}>Via</th>
               <th style={table.th}>Live</th>
@@ -391,7 +395,7 @@ export function ServerSection({ api }: SectionProps) {
                   {client.self && <span style={table.tag}>this Mac</span>}
                 </td>
                 <td style={{ ...table.td, ...styles.mono, fontSize: 11, letterSpacing: '-0.03em', overflow: 'visible', textOverflow: 'clip' }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
-                <td style={table.td} title={client.userAgent}>{client.agent}</td>
+                <td style={table.td} title={client.userAgent}>{client.agent === '—' ? <span style={table.muted}>—</span> : client.agent}</td>
                 <td style={table.td} title="open GUI WebSockets">{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
                 <td style={table.td}>{client.requests}</td>
                 <td style={table.td}>{ago(status.now - client.lastSeen)}</td>
