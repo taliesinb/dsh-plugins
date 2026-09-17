@@ -685,16 +685,16 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>
-          Address
-          <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.']} />
-        </div>
         <div style={styles.row}>
-          <span style={styles.url}>{status.url ?? '(Tailscale hostname unknown)'}</span>
+          <div style={{ ...styles.title, flex: 1 }}>
+            Address
+            <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.']} />
+          </div>
           <Button variant="outline" size="sm" disabled={status.url === undefined} onClick={() => { void copy() }}>
             {copied ? 'Copied' : 'Copy'}
           </Button>
         </div>
+        <span style={{ ...styles.url, flex: 'none', display: 'block' }}>{status.url ?? '(Tailscale hostname unknown)'}</span>
       </div>
 
       <div style={styles.group}>
@@ -728,20 +728,20 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>
-          QR code
-          <Info lines={[
-            'The code includes the standing access token: scanning it signs the device in for good, whatever its Tailscale user.',
-            'Treat it like a password — whoever scans it can run commands on this machine.',
-            'Rotate signs out every device that used the code; allowed Tailscale users are unaffected.',
-          ]} />
-        </div>
-        <div style={{ ...styles.row, alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          {status.qrSvg === undefined
-            ? <div style={{ ...styles.qr, display: 'grid', placeItems: 'center', color: '#888', fontSize: 12 }}>unavailable</div>
-            : <div style={styles.qr} dangerouslySetInnerHTML={{ __html: status.qrSvg }} />}
+        <div style={styles.row}>
+          <div style={{ ...styles.title, flex: 1 }}>
+            QR code
+            <Info lines={[
+              'The code includes the standing access token: scanning it signs the device in for good, whatever its Tailscale user.',
+              'Treat it like a password — whoever scans it can run commands on this machine.',
+              'Rotate signs out every device that used the code; allowed Tailscale users are unaffected.',
+            ]} />
+          </div>
           <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.rotateToken) }}>Rotate</Button>
         </div>
+        {status.qrSvg === undefined
+          ? <div style={{ ...styles.qr, display: 'grid', placeItems: 'center', color: '#888', fontSize: 12 }}>unavailable</div>
+          : <div style={styles.qr} dangerouslySetInnerHTML={{ __html: status.qrSvg }} />}
       </div>
 
       {status.dockApp !== undefined && <div style={styles.group}>
