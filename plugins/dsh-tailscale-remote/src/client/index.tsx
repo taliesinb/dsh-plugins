@@ -23,7 +23,7 @@ import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/cli
 import { Button, Input, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
@@ -236,17 +236,60 @@ function ActionIcon({ id }: { id: string }) {
   }
 }
 
-/** Small circled "i" whose hover shows `lines` (empty strings become blank lines). */
+/**
+ * In-page hover card (native `title` tooltips do not show inside the
+ * WKWebView Dock app). Fixed-positioned so cells with overflow:hidden cannot
+ * clip it; opens on hover or keyboard focus.
+ */
+function Hint({ text, children, style }: { text: string; children: ReactNode; style?: CSSProperties }) {
+  const [at, setAt] = useState<{ x: number; y: number } | undefined>(undefined)
+  const show = (event: { currentTarget: Element }) => {
+    const rect = event.currentTarget.getBoundingClientRect()
+    setAt({ x: rect.left, y: rect.bottom + 6 })
+  }
+  const hide = () => setAt(undefined)
+  const trimmed = text.trim()
+  return (
+    <span
+      style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom', ...style }}
+      onMouseEnter={show}
+      onMouseLeave={hide}
+      onFocus={show}
+      onBlur={hide}
+      tabIndex={trimmed === '' ? undefined : 0}
+    >
+      {children}
+      {at !== undefined && trimmed !== '' && (
+        <div
+          role="tooltip"
+          style={{
+            position: 'fixed', left: Math.min(at.x, Math.max(8, window.innerWidth - 440)), top: at.y, zIndex: 10000,
+            maxWidth: 420, padding: '8px 10px', borderRadius: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+            font: '12px/17px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-primary)',
+            background: 'var(--dsw-alias-bg-module-platform, #222)', border: '0.5px solid var(--dsw-alias-border-l4)',
+            boxShadow: '0 6px 24px rgba(0,0,0,.25)', pointerEvents: 'none',
+          }}
+        >
+          {trimmed}
+        </div>
+      )}
+    </span>
+  )
+}
+
+/** Small circled "i" whose hover card shows `lines` (empty strings become blank lines). */
 function Info({ lines }: { lines: Array<string | undefined> }) {
   const text = lines.filter((line): line is string => line !== undefined).join('\n').replace(/\n{3,}/g, '\n\n').trim()
   return (
-    <span title={text} aria-label={text} style={{ display: 'inline-flex', verticalAlign: '-2px', marginLeft: 6, color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
-      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
-        <circle cx="8" cy="8" r="6.3" />
-        <path d="M8 7.2v4" strokeLinecap="round" />
-        <circle cx="8" cy="4.9" r="0.75" fill="currentColor" stroke="none" />
-      </svg>
-    </span>
+    <Hint text={text} style={{ marginLeft: 6, verticalAlign: '-2px' }}>
+      <span aria-label={text} style={{ display: 'inline-flex', color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+          <circle cx="8" cy="8" r="6.3" />
+          <path d="M8 7.2v4" strokeLinecap="round" />
+          <circle cx="8" cy="4.9" r="0.75" fill="currentColor" stroke="none" />
+        </svg>
+      </span>
+    </Hint>
   )
 }
 
@@ -335,26 +378,28 @@ export function ServerSection({ api }: SectionProps) {
           <tbody>
             {status.processes.map(process => (
               <tr key={process.id}>
-                <td style={table.td} title={process.details.join('\n')}>
-                  <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
-                  {process.title}
+                <td style={table.td}>
+                  <Hint text={process.details.join('\n')}>
+                    <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
+                    {process.title}
+                  </Hint>
                 </td>
-                <td style={{ ...table.td, ...styles.mono }} title={process.command ?? ''}>{process.pid ?? '—'}</td>
+                <td style={{ ...table.td, ...styles.mono }}><Hint text={process.command ?? ''}>{process.pid ?? '—'}</Hint></td>
                 <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
                 <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
                 <td style={{ ...table.td, textAlign: 'right' }}>
                   {process.actions.map(action => (
-                    <button
-                      key={action.id}
-                      type="button"
-                      style={{ ...table.iconButton, opacity: busy !== undefined ? 0.5 : 1 }}
-                      disabled={busy !== undefined}
-                      title={`${action.label} ${process.title}\n${action.note}`}
-                      aria-label={`${action.label} ${process.title}`}
-                      onClick={() => { void act(process, action) }}
-                    >
-                      {busy === `${process.id}/${action.id}` ? '…' : <ActionIcon id={action.id} />}
-                    </button>
+                    <Hint key={action.id} text={`${action.label} ${process.title}\n${action.note}`}>
+                      <button
+                        type="button"
+                        style={{ ...table.iconButton, opacity: busy !== undefined ? 0.5 : 1 }}
+                        disabled={busy !== undefined}
+                        aria-label={`${action.label} ${process.title}`}
+                        onClick={() => { void act(process, action) }}
+                      >
+                        {busy === `${process.id}/${action.id}` ? '…' : <ActionIcon id={action.id} />}
+                      </button>
+                    </Hint>
                   ))}
                 </td>
               </tr>
@@ -366,7 +411,7 @@ export function ServerSection({ api }: SectionProps) {
         <div style={styles.caption}>
           Hover a process name for its details, its PID for the full command, and{' '}
           {ICON_LEGEND.map(([id, meaning]) => (
-            <span key={id} title={meaning} style={{ display: 'inline-flex', verticalAlign: 'middle', marginRight: 2 }}><ActionIcon id={id} /></span>
+            <Hint key={id} text={meaning} style={{ verticalAlign: 'middle', marginRight: 2 }}><span style={{ display: 'inline-flex' }}><ActionIcon id={id} /></span></Hint>
           ))}
           {' '}for what each does. Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.
         </div>
@@ -402,26 +447,30 @@ export function ServerSection({ api }: SectionProps) {
             )}
             {status.clients.map(client => (
               <tr key={client.key}>
-                <td style={table.td} title={`${client.login ?? client.admitted}${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
-                  {client.login === undefined
-                    ? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>
-                    : client.login.replace(/@.*$/, '')}
-                  {client.self && <span style={table.tag}>this Mac</span>}
+                <td style={table.td}>
+                  <Hint text={`${client.login ?? client.admitted}${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
+                    {client.login === undefined
+                      ? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>
+                      : client.login.replace(/@.*$/, '')}
+                    {client.self && <span style={table.tag}>this Mac</span>}
+                  </Hint>
                 </td>
                 <td style={{ ...table.td, ...styles.mono, fontSize: 11, letterSpacing: '-0.03em', overflow: 'visible', textOverflow: 'clip' }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
-                <td style={table.td} title={client.userAgent}>{client.agent === '—' ? <span style={table.muted}>—</span> : client.agent}</td>
+                <td style={table.td}><Hint text={client.userAgent}>{client.agent === '—' ? <span style={table.muted}>—</span> : client.agent}</Hint></td>
                 <td style={table.td} title="open GUI WebSockets">{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
                 <td style={table.td}>{client.requests}</td>
                 <td style={table.td}>{ago(status.now - client.lastSeen)}</td>
-                <td style={table.td} title={client.lastSession === undefined ? (client.lastPath ?? '') : `${client.lastSession.workspace ?? client.lastSession.cwd ?? ''}\n${client.lastSession.sessionId ?? ''}\n${client.lastSession.method}`}>
-                  {client.lastSession === undefined
-                    ? <span style={table.muted}>—</span>
-                    : (
-                        <>
-                          {(client.lastSession.workspace ?? client.lastSession.cwd ?? '').split('/').filter(Boolean).pop() ?? ''}
-                          {client.lastSession.sessionId !== undefined && <span style={{ ...styles.mono, ...table.muted, marginLeft: 6 }}>{client.lastSession.sessionId.replace(/^session-/, '').slice(0, 8)}</span>}
-                        </>
-                      )}
+                <td style={table.td}>
+                  <Hint text={client.lastSession === undefined ? (client.lastPath ?? '') : `${client.lastSession.workspace ?? client.lastSession.cwd ?? ''}\n${client.lastSession.sessionId ?? ''}\n${client.lastSession.method}`}>
+                    {client.lastSession === undefined
+                      ? <span style={table.muted}>—</span>
+                      : (
+                          <>
+                            {(client.lastSession.workspace ?? client.lastSession.cwd ?? '').split('/').filter(Boolean).pop() ?? ''}
+                            {client.lastSession.sessionId !== undefined && <span style={{ ...styles.mono, ...table.muted, marginLeft: 6 }}>{client.lastSession.sessionId.replace(/^session-/, '').slice(0, 8)}</span>}
+                          </>
+                        )}
+                  </Hint>
                 </td>
               </tr>
             ))}
@@ -632,13 +681,11 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
             'Rotating the token signs out every device that used the QR code; allowed Tailscale users are unaffected.',
           ]} />
         </div>
-        <div style={{ ...styles.row, alignItems: 'flex-start' }}>
+        <div style={{ ...styles.row, alignItems: 'flex-start', justifyContent: 'space-between' }}>
           {status.qrSvg === undefined
             ? <div style={{ ...styles.qr, display: 'grid', placeItems: 'center', color: '#888', fontSize: 12 }}>unavailable</div>
             : <div style={styles.qr} dangerouslySetInnerHTML={{ __html: status.qrSvg }} />}
-          <div>
-            <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.rotateToken) }}>Rotate token</Button>
-          </div>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.rotateToken) }}>Rotate</Button>
         </div>
       </div>
 
