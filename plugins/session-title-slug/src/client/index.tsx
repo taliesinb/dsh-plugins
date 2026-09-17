@@ -113,11 +113,29 @@ export const inject = ['slots', 'sessions', 'workspaces']
  * watcher into the input dock once ui-conversation has declared the slot.
  * @param ctx - browser-side cordis context.
  */
+/**
+ * The convention, published for other browser plugins that render their own
+ * New Session rows (dsh-remote-workspaces): "is the slug plugin active, and
+ * how does it parse?" — a global rather than a service, so consumers need no
+ * build-time dependency and degrade to no preview when this plugin is absent.
+ */
+export interface SessionTitleSlugConvention {
+  parseSlug: (text: string) => string | undefined
+}
+declare global {
+  // eslint-disable-next-line no-var
+  var __DSH_SESSION_TITLE_SLUG__: SessionTitleSlugConvention | undefined
+}
+
 export function apply(ctx: Context): void {
   const sessions = ctx.get('sessions') as ISessions
   const workspaces = ctx.get('workspaces') as IWorkspaces
   const preview = installPreview()
   ctx.effect(() => () => { preview.dispose() }, 'session-title-slug: sidebar preview')
+  ctx.effect(() => {
+    globalThis.__DSH_SESSION_TITLE_SLUG__ = { parseSlug }
+    return () => { delete globalThis.__DSH_SESSION_TITLE_SLUG__ }
+  }, 'session-title-slug: convention global')
 
   // Ghost rows follow the Sessions list (rows + current) and the Workspaces.
   const ghosts = installGhosts((sessionId) => { sessions.open(sessionId as SessionId) })

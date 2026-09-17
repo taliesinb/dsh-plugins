@@ -118,7 +118,12 @@ only by polling. Selecting a remote session schedules follow-up polls of its
 workspace at +12 s / +40 s / +90 s and then every 2 min while the remote
 panel stays active (`scheduleFollowUp` in store.ts), which turns the gray
 "New session" placeholder into the titled row without a manual refresh.
-The `slug: prompt` naming is done by the remote's own shell (the
+While a framed blank session is being typed into, its placeholder row shows
+the slug live: the frame is same-origin, so `useFramedSlugPreview` reads the
+framed composer's text every 300 ms and parses it with the convention the
+local `session-title-slug` plugin publishes on
+`globalThis.__DSH_SESSION_TITLE_SLUG__` (no plugin locally → no preview,
+like local rows). The `slug: prompt` naming itself is done by the remote's own shell (the
 `session-title-slug` client plugin must be installed *there* — the deploy
 script ships it); a remote whose sessions default to a small on-device model
 should pin its titler to a capable model or titles come out like "New

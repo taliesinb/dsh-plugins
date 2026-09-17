@@ -23,7 +23,7 @@ import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import type { ProbeResult, RemoteApi, RemoteWorkspace, ServerInfo } from './api.ts'
-import { FLAT_POLL_INTERVAL_MS, PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
+import { FLAT_POLL_INTERVAL_MS, frameKey, PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
 import { byServer, flatten, orderSessions, orderWorkspaces, relativeLabel, ServerHover, SessionHover, ViewOptions, WorkspaceHover } from './view.tsx'
 
 /** Inject face every component of this plugin receives. */
@@ -194,6 +194,44 @@ function halfOf(event: React.DragEvent<HTMLElement>): DropHalf {
 }
 
 // ---------------------------------------------------------------------------
+// slug preview for a framed blank session
+
+/**
+ * The `slug: prompt` naming convention is a local browser plugin
+ * (session-title-slug). Its live preview relabels the local New Session row
+ * while the draft starts with a slug; for a framed remote session the typing
+ * happens in the remote's own document, so the local plugin never sees it.
+ * The frame is same-origin, though, so this hook reads the framed composer's
+ * text directly and parses it with the convention the local plugin publishes
+ * (`globalThis.__DSH_SESSION_TITLE_SLUG__`). No plugin locally → no preview,
+ * matching what local rows do. The remote names the session itself on send.
+ */
+function useFramedSlugPreview(frameKeyOf: string | undefined): string | undefined {
+  const [slug, setSlug] = useState<string | undefined>(undefined)
+  useEffect(() => {
+    if (frameKeyOf === undefined) { setSlug(undefined); return }
+    const convention = (globalThis as { __DSH_SESSION_TITLE_SLUG__?: { parseSlug: (text: string) => string | undefined } }).__DSH_SESSION_TITLE_SLUG__
+    if (convention === undefined) { setSlug(undefined); return }
+    let last: string | undefined
+    const read = (): void => {
+      const frame = document.querySelector<HTMLIFrameElement>(`iframe[data-remote-frame="${frameKeyOf.replace(/"/gu, '\\"')}"]`)
+      let text = ''
+      try {
+        text = frame?.contentDocument?.querySelector<HTMLElement>('[role="textbox"]')?.innerText ?? ''
+      } catch {
+        text = '' // cross-origin would throw; ours is same-origin, but stay safe
+      }
+      const next = convention.parseSlug(text)
+      if (next !== last) { last = next; setSlug(next) }
+    }
+    read()
+    const timer = setInterval(read, 300)
+    return () => { clearInterval(timer) }
+  }, [frameKeyOf])
+  return slug
+}
+
+// ---------------------------------------------------------------------------
 // groups
 
 function shortId(id: string): string {
@@ -246,6 +284,7 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
     } finally { setPending(false) }
   }
   const time = session.placeholder === true ? '' : relativeLabel(session.updatedAt, now)
+  const previewSlug = useFramedSlugPreview(session.placeholder === true ? frameKey({ workspaceId: workspace.id, sessionId: session.id }) : undefined)
   const row = (
       <div
         role="treeitem"
@@ -273,7 +312,9 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
         <span style={S.slot}>{busy ? <Spinner /> : session.running === true ? <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--dsw-alias-state-business-primary)' }} /> : null}</span>
         <span style={{ ...S.sessionTitle, display: 'flex', flexDirection: 'column', gap: 1, lineHeight: '18px' }}>
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {session.title || <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>}
+            {session.title || (session.placeholder === true && previewSlug !== undefined
+              ? previewSlug
+              : <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>)}
           </span>
           {caption !== undefined && <span style={{ ...S.muted, fontSize: 11, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caption}</span>}
         </span>

@@ -128,3 +128,11 @@ preview in the New Session row; its later rename is a same-text no-op.
 
 Pair with `style: slug` on the `session-title-llm` row of the fork so
 unslugged prompts get `foo-bar-baz` titles too.
+
+## Convention global
+
+The browser half publishes `globalThis.__DSH_SESSION_TITLE_SLUG__ =
+{ parseSlug }` while loaded. Other browser plugins that render their own New
+Session rows (dsh-remote-workspaces' framed remote sessions) use it to show
+the same live slug preview without a build-time dependency, and show nothing
+when this plugin is absent.
