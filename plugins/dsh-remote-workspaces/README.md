@@ -110,6 +110,20 @@ Servers stored under the old derivation (bare first hostname label, e.g.
 `127`) are relabelled once on load. The add-modal's suggested workspace name
 uses the label with `:`/`/` turned into dashes (`alpha-dsh-<workspace>`).
 
+## Titles of framed sessions
+
+The framed page is a separate document with no channel back to this plugin,
+so the sidebar learns about a remote session's first turn (title, activity)
+only by polling. Selecting a remote session schedules follow-up polls of its
+workspace at +12 s / +40 s / +90 s and then every 2 min while the remote
+panel stays active (`scheduleFollowUp` in store.ts), which turns the gray
+"New session" placeholder into the titled row without a manual refresh.
+The `slug: prompt` naming is done by the remote's own shell (the
+`session-title-slug` client plugin must be installed *there* — the deploy
+script ships it); a remote whose sessions default to a small on-device model
+should pin its titler to a capable model or titles come out like "New
+session" (the deploy overlay pins `session-title-llm`).
+
 ## Facts worth keeping
 
 - The embedded shell computes every Host URL relative to its document directory,

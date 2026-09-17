@@ -148,11 +148,36 @@ export class RemoteWorkspacesModel {
 
   // ---- selection + frames --------------------------------------------------
 
+  /**
+   * Follow-up polls for the selected remote workspace. The framed page is a
+   * separate document with no channel back to us, so the sidebar learns about
+   * a session's first turn (title, activity) only by asking the remote: a few
+   * quick polls right after a selection catch the typical "open, type, send"
+   * sequence, then a slow cadence while the remote panel stays active.
+   */
+  private followUp: ReturnType<typeof setTimeout>[] = []
+  private followUpInterval: ReturnType<typeof setInterval> | undefined
+  private scheduleFollowUp(workspaceId: string): void {
+    this.cancelFollowUp()
+    for (const delay of [12_000, 40_000, 90_000]) {
+      this.followUp.push(setTimeout(() => { void this.poll(workspaceId) }, delay))
+    }
+    this.followUpInterval = setInterval(() => {
+      if (this.view.getSnapshot().remoteActive !== true) return
+      void this.poll(workspaceId)
+    }, 120_000)
+  }
+  private cancelFollowUp(): void {
+    for (const timer of this.followUp.splice(0)) clearTimeout(timer)
+    if (this.followUpInterval !== undefined) { clearInterval(this.followUpInterval); this.followUpInterval = undefined }
+  }
+
   /** Select a remote session: ensure its frame exists and mark it shown. */
   select(selection: RemoteSelection): void {
     const workspace = this.workspace(selection.workspaceId)
     const base = workspace?.server?.localBase
     if (base === undefined) return
+    this.scheduleFollowUp(selection.workspaceId)
     const key = frameKey(selection)
     const now = Date.now()
     this.view.update((d) => { d.selected = selection; d.remoteActive = true })
@@ -205,6 +230,7 @@ export class RemoteWorkspacesModel {
   }
 
   clearSelection(): void {
+    this.cancelFollowUp()
     this.view.update((d) => { delete d.selected; d.remoteActive = false })
   }
 

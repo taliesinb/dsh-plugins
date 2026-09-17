@@ -118,8 +118,10 @@ log "syncing dsh-tailscale-remote (runtime files; deps resolved against the sync
 # of the `apple` provider (afm must be installed on the host: `brew install
 # scouzi1966/afm/afm`), enforce-model-preset switches blank sessions on that
 # provider to the tool-less preset so a 4K on-device model gets a usable window.
-log "syncing local-model-supervisor, enforce-model-preset, minimal-no-tools preset"
-for P in local-model-supervisor enforce-model-preset; do
+log "syncing local-model-supervisor, enforce-model-preset, session-title-slug, minimal-no-tools preset"
+# session-title-slug is a browser-only plugin: the remote's own shell must run
+# it for `slug: prompt` naming to work inside the framed remote page.
+for P in local-model-supervisor enforce-model-preset session-title-slug; do
   "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
 done
 "${SSH[@]}" 'mkdir -p ~/.dsh/.agent-presets'
@@ -156,6 +158,20 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         # a headless host): the plugin re-points \`tailscale serve\` at its own
         # port on every boot, so a DSH restart never leaves Serve at a dead port.
         publishPort: 0
+# Sessions on the on-device default model would otherwise be titled by that
+# model ("i am a new session" → "New session"); pin the titler to a capable route.
+- id: session-title-llm
+  config:                       # replaces the bundle row's config wholesale
+    targetWords: 5
+    targetCjkCharacters: 10
+    maxInputBytes: 4096
+    maxOutputTokens: 64
+    timeoutMs: 60000
+    provider: anthropic
+    model: claude-fable-5-1
+- insert:
+    - id: tali-session-title-slug
+      name: '$HOME/dsh/plugins/session-title-slug/index.js'
     - id: tali-enforce-model-preset
       name: '$HOME/dsh/plugins/enforce-model-preset/index.js'
       config:
