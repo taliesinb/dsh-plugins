@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { ClientConnectionRpc } from '@deepseek-ai/dsh-client-connection/client'
 import { Button, Input, writeClipboard } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -242,17 +242,34 @@ function ActionIcon({ id }: { id: string }) {
  * clip it; opens on hover or keyboard focus.
  */
 function Hint({ text, children, style }: { text: string; children: ReactNode; style?: CSSProperties }) {
-  const [at, setAt] = useState<{ x: number; y: number } | undefined>(undefined)
+  const [anchor, setAnchor] = useState<{ left: number; top: number; bottom: number } | undefined>(undefined)
+  const [placed, setPlaced] = useState<{ left: number; top: number } | undefined>(undefined)
+  const card = useRef<HTMLDivElement | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const show = (event: { currentTarget: Element }) => {
     const rect = event.currentTarget.getBoundingClientRect()
     clearTimeout(timer.current)
-    timer.current = setTimeout(() => setAt({ x: rect.left, y: rect.bottom + 6 }), 150)
+    timer.current = setTimeout(() => setAnchor({ left: rect.left, top: rect.top, bottom: rect.bottom }), 150)
   }
   const hide = () => {
     clearTimeout(timer.current)
-    setAt(undefined)
+    setAnchor(undefined)
+    setPlaced(undefined)
   }
+  // Measure, then keep the card inside the viewport: below the anchor when it
+  // fits, above it otherwise, and never past the right edge.
+  useLayoutEffect(() => {
+    const element = card.current
+    if (anchor === undefined || element === null) return
+    const { width, height } = element.getBoundingClientRect()
+    const margin = 8
+    const below = anchor.bottom + 6
+    const top = below + height <= window.innerHeight - margin
+      ? below
+      : Math.max(margin, anchor.top - 6 - height)
+    const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - margin - width))
+    setPlaced({ left, top })
+  }, [anchor, text])
   const trimmed = text.trim()
   return (
     <span
@@ -264,11 +281,13 @@ function Hint({ text, children, style }: { text: string; children: ReactNode; st
       tabIndex={trimmed === '' ? undefined : 0}
     >
       {children}
-      {at !== undefined && trimmed !== '' && (
+      {anchor !== undefined && trimmed !== '' && (
         <div
+          ref={card}
           role="tooltip"
           style={{
-            position: 'fixed', left: Math.min(at.x, Math.max(8, window.innerWidth - 380)), top: at.y, zIndex: 10000,
+            position: 'fixed', left: placed?.left ?? anchor.left, top: placed?.top ?? anchor.bottom + 6, zIndex: 10000,
+            visibility: placed === undefined ? 'hidden' : 'visible',
             maxWidth: 360, padding: '8px 11px', borderRadius: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
             font: '12px/17px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
             background: 'var(--dsw-alias-bg-module-float, var(--dsw-alias-bg-module-platform, #2a2a2c))', border: '0.5px solid var(--dsw-alias-border-l3, var(--dsw-alias-border-l4))',
