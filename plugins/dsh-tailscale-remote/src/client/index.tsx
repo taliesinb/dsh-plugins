@@ -243,11 +243,16 @@ function ActionIcon({ id }: { id: string }) {
  */
 function Hint({ text, children, style }: { text: string; children: ReactNode; style?: CSSProperties }) {
   const [at, setAt] = useState<{ x: number; y: number } | undefined>(undefined)
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const show = (event: { currentTarget: Element }) => {
     const rect = event.currentTarget.getBoundingClientRect()
-    setAt({ x: rect.left, y: rect.bottom + 6 })
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setAt({ x: rect.left, y: rect.bottom + 6 }), 150)
   }
-  const hide = () => setAt(undefined)
+  const hide = () => {
+    clearTimeout(timer.current)
+    setAt(undefined)
+  }
   const trimmed = text.trim()
   return (
     <span
@@ -263,11 +268,11 @@ function Hint({ text, children, style }: { text: string; children: ReactNode; st
         <div
           role="tooltip"
           style={{
-            position: 'fixed', left: Math.min(at.x, Math.max(8, window.innerWidth - 440)), top: at.y, zIndex: 10000,
-            maxWidth: 420, padding: '8px 10px', borderRadius: 8, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-            font: '12px/17px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-primary)',
-            background: 'var(--dsw-alias-bg-module-platform, #222)', border: '0.5px solid var(--dsw-alias-border-l4)',
-            boxShadow: '0 6px 24px rgba(0,0,0,.25)', pointerEvents: 'none',
+            position: 'fixed', left: Math.min(at.x, Math.max(8, window.innerWidth - 380)), top: at.y, zIndex: 10000,
+            maxWidth: 360, padding: '8px 11px', borderRadius: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
+            font: '12px/17px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
+            background: 'var(--dsw-alias-bg-module-float, var(--dsw-alias-bg-module-platform, #2a2a2c))', border: '0.5px solid var(--dsw-alias-border-l3, var(--dsw-alias-border-l4))',
+            boxShadow: '0 8px 28px rgba(0,0,0,.28), 0 1px 3px rgba(0,0,0,.2)', pointerEvents: 'none',
           }}
         >
           {trimmed}
@@ -279,7 +284,7 @@ function Hint({ text, children, style }: { text: string; children: ReactNode; st
 
 /** Small circled "i" whose hover card shows `lines` (empty strings become blank lines). */
 function Info({ lines }: { lines: Array<string | undefined> }) {
-  const text = lines.filter((line): line is string => line !== undefined).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  const text = lines.filter((line): line is string => line !== undefined && line !== '').join('\n\n').trim()
   return (
     <Hint text={text} style={{ marginLeft: 6, verticalAlign: '-2px' }}>
       <span aria-label={text} style={{ display: 'inline-flex', color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
@@ -610,8 +615,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
             <span style={styles.dot(route.color)} />
             {route.text}
             <Info lines={[
-              `Publishes this DSH on your tailnet with tailscale serve at ${status.mountPath} (HTTPS, port ${String(status.servePort)}),`,
-              `behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on ${status.proxyUrl}`}.`,
+              `Publishes this DSH on your tailnet with tailscale serve at ${status.mountPath} (HTTPS, port ${String(status.servePort)}), behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on ${status.proxyUrl}`}.`,
               'Only devices on the tailnet can reach it.',
             ]} />
           </div>
@@ -630,7 +634,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
       <div style={styles.group}>
         <div style={styles.title}>
           Address
-          <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding,', 'so the page needs it to find its assets.']} />
+          <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.']} />
         </div>
         <div style={styles.row}>
           <span style={styles.url}>{status.url ?? '(Tailscale hostname unknown)'}</span>
@@ -644,9 +648,8 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           Allowed Tailscale users
           <Info lines={[
-            'Comma-separated tailnet logins (as shown by tailscale whois).',
-            'A device whose verified Tailscale login is listed enters without a token;',
-            'anyone else needs the QR code below.',
+            'Comma-separated tailnet logins, as shown by tailscale whois.',
+            'A device whose verified Tailscale login is listed enters without a token; anyone else needs the QR code below.',
             status.selfLogin === undefined ? '' : `Your own login (${status.selfLogin}) is always allowed, listed or not.`,
           ]} />
         </div>
@@ -675,10 +678,9 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           QR code
           <Info lines={[
-            `Scanning it opens ${status.url ?? ''}?token=… and signs the device in for good,`,
-            'whatever its Tailscale user — it includes the standing access token.',
-            'Treat it like a password: whoever scans it can run commands on this machine.',
-            'Rotating the token signs out every device that used the QR code; allowed Tailscale users are unaffected.',
+            'The code includes the standing access token: scanning it signs the device in for good, whatever its Tailscale user.',
+            'Treat it like a password — whoever scans it can run commands on this machine.',
+            'Rotate signs out every device that used the code; allowed Tailscale users are unaffected.',
           ]} />
         </div>
         <div style={{ ...styles.row, alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -693,8 +695,8 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           This Mac{status.instance ? ` — ${status.instance} instance` : ''}
           <Info lines={status.selfLogin === undefined
-            ? ['This node has no Tailscale user (tagged device).', 'Its own requests carry no identity, so the macOS app would need the QR token.']
-            : [`Your login ${status.selfLogin} is always allowed.`, `Requests this Mac makes to ${status.url ?? 'the tailnet address'}`, 'are signed in by Tailscale itself: no token, no cookie, nothing to expire.', 'That is how the macOS app and Safari on this Mac get in.']} />
+            ? ['This node has no Tailscale user (tagged device): its own requests carry no identity, so the macOS app would need the QR token.']
+            : [`Requests this Mac makes to ${status.url ?? 'the tailnet address'} are signed in by Tailscale itself as ${status.selfLogin} — no token, no cookie, nothing to expire.`, 'That is how the macOS app and Safari on this Mac get in.']} />
         </div>
         {(() => {
           const dockApp = status.dockApp
@@ -718,10 +720,8 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                   dockApp.kind === 'safari-webapp' ? `currently a Safari web app for ${dockApp.url ?? '?'} (30-day cookie it cannot renew)` : '',
                   dockApp.kind === 'other' ? 'something else sits at that path: change dockAppName or remove it' : '',
                   '',
-                  'A small native WKWebView app (no Safari, no permissions).',
-                  'Links leaving DSH open in your browser.',
-                  `Built with swiftc (a few seconds the first time)${dockApp.toolchain ? '' : ' — install the Xcode Command Line Tools first'}.`,
-                  'Quit / relaunch it from the Server pane.',
+                  `A small native WKWebView app — no Safari, no permissions. Links leaving DSH open in your browser. Built with swiftc, a few seconds the first time${dockApp.toolchain ? '' : ' (install the Xcode Command Line Tools first)'}.`,
+                  'Quit or relaunch it from the Server pane.',
                 ]} />
               </div>
               {dock.action !== undefined && (
@@ -751,14 +751,10 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                 <Info lines={[
                   described.text,
                   '',
-                  `LaunchAgent ${relay.label ?? ''}`,
-                  `answers ${relay.spec.listen} (what tailscale serve targets) → proxy ${relay.spec.backend}`,
-                  `when DSH is down, runs: ${relay.spec.start}`,
-                  `in ${relay.spec.cwd}`,
-                  'and shows a “Starting DSH…” page until it answers.',
-                  `logs: ${relay.spec.logDir}`,
-                  '',
-                  'Restart / stop it from the Server pane.',
+                  `LaunchAgent ${relay.label ?? ''}: always answers ${relay.spec.listen} (what tailscale serve targets) and relays to the proxy on ${relay.spec.backend}.`,
+                  `When DSH is down it runs “${relay.spec.start}” in ${relay.spec.cwd} and shows a “Starting DSH…” page until it answers.`,
+                  `Logs: ${relay.spec.logDir}`,
+                  'Restart or stop it from the Server pane.',
                 ]} />
               </div>
               <Button variant={relay.loaded ? 'outline' : 'primary'} size="sm" disabled={busy} onClick={() => { void run(api.installRelay) }}>
