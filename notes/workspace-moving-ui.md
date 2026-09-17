@@ -146,7 +146,15 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
    `session/moveMany` `{ request: { sessionIds, destination, … } }`.
    **Unblocks the concrete migration from the tools note** (one-off `moveMany` call;
    recipes-workspace → `tali-dash-plugins`) — not yet run against the live home.
-2. Fork client: contribution registry, Move/Rehome modals, cross-workspace DnD.
+2. Fork client — **DONE 2026-09-17**, commit `6667d9d984`. `ISessions.move/moveMany`
+   (RemoteResult, not thrown); "Move to…" / "Rehome workspace…" row items; dialogs in
+   `rows/MoveDialogs.tsx` reuse `WorkspacePickFlow` as the destination picker;
+   stop-and-move offered only after a `session/move-live` refusal (no client-side
+   liveness guess); drag onto another group = move (refusal → dialog prefilled);
+   `ctx.uiWorkspace.contributeSessionMenu/contributeWorkspaceMenu` + observable
+   `menuContributions`. Verified live on the preview. Pre-existing failing test noted:
+   `client-runtime/tests/assembly-dependencies` (HMR without Connection) fails on this
+   branch before these changes too.
 3. Fork host: `export`/`import` with attachment bundling.
 4. Plugin: registry consumers on remote rows, remote destinations, relay, DnD.
 
