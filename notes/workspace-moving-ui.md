@@ -172,9 +172,30 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
    Known gap: the destination has no projection cache for the imported session, so the
    sidebar row shows the directory basename until first open (the title lives in the log
    and resurfaces then); bundling `sessionListMetadata`/title hints is a later nicety.
-4. Plugin: registry consumers on remote rows, remote destinations, relay, DnD.
+4. Plugin — **DONE 2026-09-17**, commit `b73cb81` (+ fork `250059b520`: a generic
+   `session-persistence/stored(header)` event the Session Controller turns into the
+   client's `api-session/added` upsert, so import/relocate don't build summaries; import
+   seeds the destination's projection cache via `coldSnapshot` so titles show at once).
+   Plugin host: `sessions.move` (same remote) and `sessions.transfer` (export → import →
+   archive source; stopLive cancels first); egress `fetchRaw`; local API in-process via
+   `connection.createSharedFetchHandler('/api')`. Client: "Move to…" on remote rows,
+   "Move to remote…" contributed to local rows (`ctx.inject(['uiWorkspace'])` — a plain
+   `ctx.get` at apply time ran before the service existed), one `MoveRemoteDialog`.
+   Verified all three paths live. **Not done:** dragging a local row onto a remote
+   group (the fork's DnD is tree-internal; cross-tree needs a shared dataTransfer type);
+   rehome of a remote workspace (remote-side `moveMany` is one RPC away but has no UI).
 
-## 5. Pointers
+## 5. Follow-ups
+
+- Cross-tree DnD (local row → remote group and back).
+- Rehome for remote groups (call the remote's `session.moveMany`).
+- Export bundling of `sessionListMetadata` is unnecessary now (cache seed covers it).
+- Run the concrete migration from `workspace-moving-tools.md` against the live home once
+  the live server runs `feat/embed-session`: `session.moveMany` of the recipes-workspace
+  sessions into `~/github/tali-dash-plugins`.
+- Exercise the real tailnet path against alpha (asleep at time of writing).
+
+## 6. Pointers
 
 - Mechanics + reference implementation notes: `workspace-moving-tools.md`.
 - Menus: `packages/client/ui-workspace/src/client/rows/Rows.tsx` (`sessionMenuItems` ~417, `workspaceMenuItems` ~129); DnD wiring there and in `tree.ts`.
