@@ -33,13 +33,13 @@ function header(req, name) {
 export function describeUserAgent(ua) {
   const text = String(ua ?? '')
   if (text === '') return 'unknown'
-  if (/DSHDock\//.test(text)) return 'DSH Dock app'
+  if (/DSHDock\//.test(text)) return 'Dock app'
   if (/curl\//.test(text)) return 'curl'
-  if (/CriOS|Chrome\//.test(text) && !/Edg\//.test(text)) return /Mobile/.test(text) ? 'Chrome (mobile)' : 'Chrome'
+  if (/CriOS|Chrome\//.test(text) && !/Edg\//.test(text)) return /Mobile/.test(text) ? 'Chrome mobile' : 'Chrome'
   if (/Edg\//.test(text)) return 'Edge'
   if (/Firefox\//.test(text)) return 'Firefox'
-  if (/Safari\//.test(text)) return /iPhone|iPad/.test(text) ? 'Safari (iOS)' : 'Safari'
-  return text.slice(0, 40)
+  if (/Safari\//.test(text)) return /iPhone|iPad/.test(text) ? 'iOS Safari' : 'Safari'
+  return 'other'
 }
 
 /** Identity facts of one request as seen by DSH. */
@@ -96,7 +96,9 @@ export function attachClientTracker(httpServer, options = {}) {
     const row = rowFor(req)
     row.requests += 1
     const url = String(req.url ?? '/')
-    row.lastPath = url.split('?')[0]
+    const path = url.split('?')[0]
+    // The Server pane's own polling is not "viewing" anything.
+    if (!path.startsWith('/tailscale-remote/')) row.lastPath = path
     if (req.method === 'POST' && url.startsWith('/api/')) {
       const method = url.slice('/api/'.length).split('?')[0]
       if (/^session\//.test(method)) {
@@ -206,7 +208,7 @@ export async function processTable(spec) {
     rows.push({
       id: 'relay',
       title: 'Relay',
-      detail: `LaunchAgent ${relay.label ?? ''} on ${relay.spec.listen}`,
+      details: [`LaunchAgent ${relay.label ?? ''}`, `listening on ${relay.spec.listen}`, `→ proxy ${relay.spec.backend}`, ...(facts === undefined ? [] : [facts.command])],
       pid: relay.pid,
       running: relay.loaded && relay.pid !== undefined,
       uptimeSeconds: facts?.uptimeSeconds,
@@ -222,7 +224,13 @@ export async function processTable(spec) {
   rows.push({
     id: 'dsh',
     title: 'dsh web',
-    detail: `this server — 127.0.0.1:${String(spec.port)}, DSH_HOME ${spec.dshHome}${parent === undefined ? '' : `, started by ${parent.command.split(' ').slice(0, 2).join(' ')} (pid ${String(parent.pid)})`}`,
+    details: [
+      'this server',
+      `http://127.0.0.1:${String(spec.port)}/`,
+      `DSH_HOME ${spec.dshHome}`,
+      ...(parent === undefined ? [] : [`started by pid ${String(parent.pid)}: ${parent.command}`]),
+      ...(self === undefined ? [] : [self.command]),
+    ],
     pid: process.pid,
     running: true,
     uptimeSeconds: Math.round(process.uptime()),
@@ -237,7 +245,7 @@ export async function processTable(spec) {
   rows.push({
     id: 'dock-app',
     title: `${spec.dockAppName}.app`,
-    detail: spec.dockAppPath,
+    details: [spec.dockAppPath, ...(dockFacts === undefined ? [] : [dockFacts.command])],
     pid: dockPids[0],
     running: dockPids.length > 0,
     uptimeSeconds: dockFacts?.uptimeSeconds,
@@ -256,7 +264,7 @@ export async function processTable(spec) {
       rows.push({
         id: 'afm',
         title: 'afm',
-        detail: 'Apple Foundation model server (local-model-supervisor starts it on demand)',
+        details: ['Apple Foundation model server', 'started on demand by local-model-supervisor', ...(facts === undefined ? [] : [facts.command])],
         pid: afmPids[0],
         running: true,
         uptimeSeconds: facts?.uptimeSeconds,

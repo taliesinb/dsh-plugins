@@ -89,7 +89,8 @@ export interface ServerAction { id: string; label: string; note: string; danger?
 export interface ServerProcess {
   id: string
   title: string
-  detail: string
+  /** One fact per line, shown on hover. */
+  details: string[]
   pid?: number
   running: boolean
   uptimeSeconds?: number
@@ -206,13 +207,34 @@ function ago(ms: number): string {
 }
 
 const table = {
-  wrap: { width: '100%', overflowX: 'auto' } as CSSProperties,
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12, lineHeight: '18px' } as CSSProperties,
-  th: { textAlign: 'left', padding: '4px 8px', color: 'var(--dsw-alias-label-tertiary)', fontWeight: 500, borderBottom: '0.5px solid var(--dsw-alias-border-l2)', whiteSpace: 'nowrap' } as CSSProperties,
-  td: { padding: '6px 8px', borderBottom: '0.5px solid var(--dsw-alias-border-l1, var(--dsw-alias-border-l2))', verticalAlign: 'top', color: 'var(--dsw-alias-label-primary)' } as CSSProperties,
+  table: { width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 12, lineHeight: '18px' } as CSSProperties,
+  th: { textAlign: 'left', padding: '4px 6px', color: 'var(--dsw-alias-label-tertiary)', fontWeight: 500, borderBottom: '0.5px solid var(--dsw-alias-border-l2)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+  td: { padding: '6px 6px', borderBottom: '0.5px solid var(--dsw-alias-border-l1, var(--dsw-alias-border-l2))', verticalAlign: 'middle', color: 'var(--dsw-alias-label-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
   muted: { color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
-  tag: { display: 'inline-block', padding: '0 6px', borderRadius: 6, fontSize: 11, lineHeight: '16px', background: 'var(--dsw-alias-bg-module-platform)', border: '0.5px solid var(--dsw-alias-border-l4)', marginLeft: 6 } as CSSProperties,
+  tag: { display: 'inline-block', padding: '0 5px', borderRadius: 6, fontSize: 10, lineHeight: '15px', background: 'var(--dsw-alias-bg-module-platform)', border: '0.5px solid var(--dsw-alias-border-l4)', marginLeft: 6, verticalAlign: '1px' } as CSSProperties,
+  iconButton: {
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, marginLeft: 4, padding: 0,
+    borderRadius: 6, border: '0.5px solid var(--dsw-alias-border-l4)', background: 'transparent', color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))', cursor: 'pointer',
+  } as CSSProperties,
 }
+
+/** Small monochrome glyphs for the process actions. */
+function ActionIcon({ id }: { id: string }) {
+  const common = { width: 13, height: 13, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
+  switch (id) {
+    case 'restart':
+    case 'relaunch':
+      // circular arrow
+      return <svg {...common} aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" /><path d="M13.6 2.6v3h-3" /></svg>
+    case 'launch':
+      return <svg {...common} aria-hidden="true"><path d="M5 3.5v9l7.5-4.5z" fill="currentColor" stroke="none" /></svg>
+    default:
+      // stop / quit: square
+      return <svg {...common} aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1.2" fill="currentColor" stroke="none" /></svg>
+  }
+}
+
+const ICON_LEGEND: Array<[string, string]> = [['restart', 'restart / relaunch'], ['stop', 'stop / quit'], ['launch', 'launch']]
 
 export function ServerSection({ api }: SectionProps) {
   const [status, setStatus] = useState<ServerStatus | undefined>(undefined)
@@ -277,103 +299,116 @@ export function ServerSection({ api }: SectionProps) {
     <div style={styles.section}>
       <div style={styles.group}>
         <div style={styles.title}>Processes{status.instance ? ` — ${status.instance} instance` : ''}</div>
-        <div style={table.wrap}>
-          <table style={table.table}>
-            <thead>
-              <tr>
-                <th style={table.th}>Process</th>
-                <th style={table.th}>PID</th>
-                <th style={table.th}>Up</th>
-                <th style={table.th}>RSS</th>
-                <th style={table.th}>Actions</th>
+        <table style={table.table}>
+          <colgroup>
+            <col style={{ width: '46%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '24%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={table.th}>Process</th>
+              <th style={table.th}>Up</th>
+              <th style={table.th}>RSS</th>
+              <th style={{ ...table.th, textAlign: 'right' }}>PID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.processes.map(process => (
+              <tr key={process.id}>
+                <td style={table.td} title={process.details.join('\n')}>
+                  <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
+                  {process.title}
+                </td>
+                <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
+                <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
+                <td style={{ ...table.td, textAlign: 'right' }}>
+                  <span style={styles.mono}>{process.pid ?? '—'}</span>
+                  {process.actions.map(action => (
+                    <button
+                      key={action.id}
+                      type="button"
+                      style={{ ...table.iconButton, opacity: busy !== undefined ? 0.5 : 1 }}
+                      disabled={busy !== undefined}
+                      title={`${action.label} ${process.title}\n${action.note}`}
+                      aria-label={`${action.label} ${process.title}`}
+                      onClick={() => { void act(process, action) }}
+                    >
+                      {busy === `${process.id}/${action.id}` ? '…' : <ActionIcon id={action.id} />}
+                    </button>
+                  ))}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {status.processes.map(process => (
-                <tr key={process.id}>
-                  <td style={table.td}>
-                    <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
-                    {process.title}
-                    <div style={{ ...table.muted, fontSize: 11 }}>{process.detail}</div>
-                  </td>
-                  <td style={{ ...table.td, ...styles.mono }}>{process.pid ?? '—'}</td>
-                  <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
-                  <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
-                  <td style={{ ...table.td, whiteSpace: 'nowrap' }}>
-                    {process.actions.map(action => (
-                      <Button
-                        key={action.id}
-                        variant="outline"
-                        size="sm"
-                        disabled={busy !== undefined}
-                        title={action.note}
-                        style={{ marginRight: 6 }}
-                        onClick={() => { void act(process, action) }}
-                      >
-                        {busy === `${process.id}/${action.id}` ? 'Working…' : action.label}
-                      </Button>
-                    ))}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
         {message !== undefined && <div style={styles.caption}>{message}</div>}
         {error !== undefined && <div style={styles.error}>{error}</div>}
         <div style={styles.caption}>
-          Hover an action for what it does. Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.
+          Hover a process name for its details and{' '}
+          {ICON_LEGEND.map(([id, meaning]) => (
+            <span key={id} title={meaning} style={{ display: 'inline-flex', verticalAlign: 'middle', marginRight: 2 }}><ActionIcon id={id} /></span>
+          ))}
+          {' '}for what each does. Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.
         </div>
       </div>
 
       <div style={styles.group}>
         <div style={styles.title}>Clients</div>
         {!status.tracking && <div style={styles.error}>Client tracking unavailable: the web server’s internal http.Server is not reachable in this DSH build.</div>}
-        <div style={table.wrap}>
-          <table style={table.table}>
-            <thead>
-              <tr>
-                <th style={table.th}>Who</th>
-                <th style={table.th}>From</th>
-                <th style={table.th}>App</th>
-                <th style={table.th}>Live</th>
-                <th style={table.th}>Requests</th>
-                <th style={table.th}>Last seen</th>
-                <th style={table.th}>Viewing</th>
+        <table style={table.table}>
+          <colgroup>
+            <col style={{ width: '27%' }} />
+            <col style={{ width: '17%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '10%' }} />
+            <col style={{ width: '19%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th style={table.th}>Who</th>
+              <th style={table.th}>From</th>
+              <th style={table.th}>App</th>
+              <th style={table.th}>Live</th>
+              <th style={table.th}>Req</th>
+              <th style={table.th}>Seen</th>
+              <th style={table.th}>Viewing</th>
+            </tr>
+          </thead>
+          <tbody>
+            {status.clients.length === 0 && (
+              <tr><td style={{ ...table.td, ...table.muted }} colSpan={7}>No clients in the last 2 minutes.</td></tr>
+            )}
+            {status.clients.map(client => (
+              <tr key={client.key}>
+                <td style={table.td} title={`${client.login ?? client.admitted}${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
+                  {client.login ?? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>}
+                  {client.self && <span style={table.tag}>this Mac</span>}
+                </td>
+                <td style={{ ...table.td, ...styles.mono }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
+                <td style={table.td} title={client.userAgent}>{client.agent}</td>
+                <td style={table.td} title="open GUI WebSockets">{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
+                <td style={table.td}>{client.requests}</td>
+                <td style={table.td}>{ago(status.now - client.lastSeen)}</td>
+                <td style={table.td} title={client.lastSession === undefined ? (client.lastPath ?? '') : `${client.lastSession.workspace ?? client.lastSession.cwd ?? ''}\n${client.lastSession.sessionId ?? ''}\n${client.lastSession.method}`}>
+                  {client.lastSession === undefined
+                    ? <span style={table.muted}>—</span>
+                    : (
+                        <>
+                          {(client.lastSession.workspace ?? client.lastSession.cwd ?? '').split('/').filter(Boolean).pop() ?? ''}
+                          {client.lastSession.sessionId !== undefined && <span style={{ ...styles.mono, ...table.muted, marginLeft: 6 }}>{client.lastSession.sessionId.replace(/^session-/, '').slice(0, 8)}</span>}
+                        </>
+                      )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {status.clients.length === 0 && (
-                <tr><td style={{ ...table.td, ...table.muted }} colSpan={7}>No clients in the last 2 minutes.</td></tr>
-              )}
-              {status.clients.map(client => (
-                <tr key={client.key}>
-                  <td style={table.td}>
-                    {client.login ?? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>}
-                    {client.self && <span style={table.tag}>this Mac</span>}
-                  </td>
-                  <td style={{ ...table.td, ...styles.mono }}>{client.address}{client.proxied ? '' : ' (direct)'}</td>
-                  <td style={table.td} title={client.userAgent}>{client.agent}</td>
-                  <td style={table.td}>{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
-                  <td style={table.td}>{client.requests}</td>
-                  <td style={table.td}>{ago(status.now - client.lastSeen)} ago</td>
-                  <td style={table.td}>
-                    {client.lastSession === undefined
-                      ? <span style={table.muted}>{client.lastPath ?? '—'}</span>
-                      : (
-                          <>
-                            {client.lastSession.workspace ?? client.lastSession.cwd ?? ''}
-                            {client.lastSession.sessionId !== undefined && <div style={{ ...styles.mono, ...table.muted }}>{client.lastSession.sessionId.replace(/^session-/, '').slice(0, 8)} · {client.lastSession.method}</div>}
-                          </>
-                        )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
         <div style={styles.caption}>
-          Everyone who reached this DSH in the last 2 minutes: tailnet clients through the proxy (Tailscale login, tailnet IP) and direct loopback tabs. “Live” counts open GUI WebSockets; “Viewing” is the last session-related call, not a live cursor.
+          Everyone who reached this DSH in the last 2 minutes — tailnet clients through the proxy (Tailscale login, tailnet IP) and direct loopback tabs. Hover a cell for details; “Viewing” is the workspace and session of the last session-related call, not a live cursor.
         </div>
       </div>
     </div>
