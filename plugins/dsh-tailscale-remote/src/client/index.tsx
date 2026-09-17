@@ -236,6 +236,20 @@ function ActionIcon({ id }: { id: string }) {
   }
 }
 
+/** Small circled "i" whose hover shows `lines` (empty strings become blank lines). */
+function Info({ lines }: { lines: Array<string | undefined> }) {
+  const text = lines.filter((line): line is string => line !== undefined).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return (
+    <span title={text} aria-label={text} style={{ display: 'inline-flex', verticalAlign: '-2px', marginLeft: 6, color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
+        <circle cx="8" cy="8" r="6.3" />
+        <path d="M8 7.2v4" strokeLinecap="round" />
+        <circle cx="8" cy="4.9" r="0.75" fill="currentColor" stroke="none" />
+      </svg>
+    </span>
+  )
+}
+
 const ICON_LEGEND: Array<[string, string]> = [['restart', 'restart / relaunch'], ['stop', 'stop / quit'], ['launch', 'launch']]
 
 export function ServerSection({ api }: SectionProps) {
@@ -621,60 +635,84 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
       </div>
 
       {status.dockApp !== undefined && <div style={styles.group}>
-        <div style={styles.title}>This Mac{status.instance ? ` — ${status.instance} instance` : ''}</div>
-        <div style={styles.caption}>
-          {status.selfLogin === undefined
-            ? 'This node has no Tailscale user (tagged device): its own requests carry no identity, so the Dock app would need the QR token.'
-            : <>Your own login <code>{status.selfLogin}</code> is always allowed: requests this Mac makes to {status.url ?? 'the tailnet address'} are signed in by Tailscale itself — no token, no cookie, nothing to expire.</>}
+        <div style={styles.title}>
+          This Mac{status.instance ? ` — ${status.instance} instance` : ''}
+          <Info lines={status.selfLogin === undefined
+            ? ['This node has no Tailscale user (tagged device).', 'Its own requests carry no identity, so the macOS app would need the QR token.']
+            : [`Your login ${status.selfLogin} is always allowed.`, `Requests this Mac makes to ${status.url ?? 'the tailnet address'}`, 'are signed in by Tailscale itself: no token, no cookie, nothing to expire.', 'That is how the macOS app and Safari on this Mac get in.']} />
         </div>
         {(() => {
           const dockApp = status.dockApp
           const dock = describeDockApp(dockApp, status.url)
+          const state = dock.action === undefined && !dockApp.toolchain ? 'needs Xcode Command Line Tools'
+            : dockApp.kind === 'wrapper' && dockApp.current ? 'installed'
+              : dockApp.kind === 'wrapper' ? 'installed, points elsewhere'
+                : dockApp.kind === 'safari-webapp' ? 'Safari web app (replace)'
+                  : dockApp.kind === 'other' ? 'blocked by another app'
+                    : 'not installed'
           return (
-            <>
-              <div style={styles.row}>
-                <div style={{ ...styles.sub, flex: 1 }}>
-                  <span style={styles.dot(dock.color)} />
-                  {dock.text}
-                </div>
-                {dock.action !== undefined && (
-                  <Button variant={dock.action === 'reinstall' ? 'outline' : 'primary'} size="sm" disabled={busy || status.url === undefined} onClick={() => { void run(api.installDockApp) }}>
-                    {busy ? 'Working…' : dock.action === 'install' ? 'Install Dock app' : dock.action === 'replace' ? 'Replace with Dock app' : 'Reinstall Dock app'}
-                  </Button>
-                )}
-                {dockApp.kind === 'wrapper' && (
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallDockApp) }}>Remove</Button>
-                )}
+            <div style={styles.row}>
+              <div style={{ ...styles.sub, flex: 1 }}>
+                <span style={styles.dot(dock.color)} />
+                macOS app: {state}
+                <Info lines={[
+                  dockApp.path,
+                  `opens ${status.url ?? '(tailnet address unknown)'}`,
+                  `falls back to ${dockApp.fallbackUrl} + token when Tailscale is off`,
+                  dockApp.kind === 'wrapper' && !dockApp.current ? `currently points at ${dockApp.url ?? '?'} — reinstall` : '',
+                  dockApp.kind === 'safari-webapp' ? `currently a Safari web app for ${dockApp.url ?? '?'} (30-day cookie it cannot renew)` : '',
+                  dockApp.kind === 'other' ? 'something else sits at that path: change dockAppName or remove it' : '',
+                  '',
+                  'A small native WKWebView app (no Safari, no permissions).',
+                  'Links leaving DSH open in your browser.',
+                  `Built with swiftc (a few seconds the first time)${dockApp.toolchain ? '' : ' — install the Xcode Command Line Tools first'}.`,
+                  'Quit / relaunch it from the Server pane.',
+                ]} />
               </div>
-              <div style={styles.caption}>
-                A small native app (<span style={styles.mono}>{dockApp.name}.app</span>, WKWebView) that opens {status.url ?? 'the tailnet address'} and falls back to <span style={styles.mono}>{dockApp.fallbackUrl}</span> with the token when Tailscale is off.
-                Links leaving DSH open in your browser. Building it compiles with <span style={styles.mono}>swiftc</span> (a few seconds the first time).
-              </div>
-            </>
+              {dock.action !== undefined && (
+                <Button variant={dock.action === 'reinstall' ? 'outline' : 'primary'} size="sm" disabled={busy || status.url === undefined} onClick={() => { void run(api.installDockApp) }}>
+                  {busy ? 'Working…' : dock.action === 'install' ? 'Install' : dock.action === 'replace' ? 'Replace' : 'Reinstall'}
+                </Button>
+              )}
+              {dockApp.kind === 'wrapper' && (
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallDockApp) }}>Uninstall</Button>
+              )}
+            </div>
           )
         })()}
         {status.relay !== undefined && (() => {
-          const relay = describeRelay(status.relay, status.enabled)
+          const relay = status.relay
+          const described = describeRelay(relay, status.enabled)
+          const state = relay.loaded && relay.listening ? `running (pid ${String(relay.pid ?? '?')})`
+            : relay.loaded ? 'loaded, not answering'
+              : relay.listening ? 'port taken by something else'
+                : relay.installed ? 'installed, not loaded'
+                  : 'not installed'
           return (
-            <>
-              <div style={styles.row}>
-                <div style={{ ...styles.sub, flex: 1 }}>
-                  <span style={styles.dot(relay.color)} />
-                  {relay.text}
-                </div>
-                <Button variant={status.relay.loaded ? 'outline' : 'primary'} size="sm" disabled={busy} onClick={() => { void run(api.installRelay) }}>
-                  {busy ? 'Working…' : status.relay.loaded ? 'Reinstall relay' : 'Install relay'}
-                </Button>
-                {status.relay.installed && (
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallRelay) }}>Remove</Button>
-                )}
+            <div style={styles.row}>
+              <div style={{ ...styles.sub, flex: 1 }}>
+                <span style={styles.dot(described.color)} />
+                relay: {state}
+                <Info lines={[
+                  described.text,
+                  '',
+                  `LaunchAgent ${relay.label ?? ''}`,
+                  `answers ${relay.spec.listen} (what tailscale serve targets) → proxy ${relay.spec.backend}`,
+                  `when DSH is down, runs: ${relay.spec.start}`,
+                  `in ${relay.spec.cwd}`,
+                  'and shows a “Starting DSH…” page until it answers.',
+                  `logs: ${relay.spec.logDir}`,
+                  '',
+                  'Restart / stop it from the Server pane.',
+                ]} />
               </div>
-              <div style={styles.caption}>
-                A LaunchAgent that always answers {status.relay.spec.listen} (what <code>tailscale serve</code> targets) and relays to the proxy on {status.relay.spec.backend}.
-                When DSH is not running it runs <span style={styles.mono}>{status.relay.spec.start}</span> in <span style={styles.mono}>{status.relay.spec.cwd}</span> and shows a “starting” page until it answers; logs in <span style={styles.mono}>{status.relay.spec.logDir}</span>.
-                Restart both with <span style={styles.mono}>launchctl kickstart -k gui/$UID/{status.relay.label ?? 'io.github.taliesinb.dsh-web-relay'}</span>.
-              </div>
-            </>
+              <Button variant={relay.loaded ? 'outline' : 'primary'} size="sm" disabled={busy} onClick={() => { void run(api.installRelay) }}>
+                {busy ? 'Working…' : relay.loaded ? 'Reinstall' : 'Install'}
+              </Button>
+              {relay.installed && (
+                <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.uninstallRelay) }}>Uninstall</Button>
+              )}
+            </div>
           )
         })()}
       </div>}
