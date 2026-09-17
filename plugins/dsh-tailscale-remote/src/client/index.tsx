@@ -313,7 +313,7 @@ export function ServerSection({ api }: SectionProps) {
             <tr>
               <th style={table.th}>Process</th>
               <th style={table.th}>PID</th>
-              <th style={table.th}>Up</th>
+              <th style={table.th}>Uptime</th>
               <th style={table.th}>RSS</th>
               <th style={{ ...table.th, textAlign: 'right' }}>Actions</th>
             </tr>
