@@ -91,6 +91,8 @@ export interface ServerAction { id: string; label: string; note: string; danger?
 export interface ServerProcess {
   id: string
   title: string
+  /** What it is and why it exists, one short paragraph. */
+  purpose?: string
   /** One fact per line, shown on hover over the name. */
   details: string[]
   /** Full command line, shown on hover over the PID. */
@@ -281,7 +283,7 @@ function Hint({ text, children, style, mono, copyText }: { text: string; childre
   }
   return (
     <span
-      style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom', cursor: trimmed === '' ? undefined : 'copy', ...style }}
+      style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom', ...style }}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}
@@ -383,11 +385,14 @@ export function commandLines(command: string): string[] {
 }
 
 /** Small circled "i" whose hover card shows `lines` (empty strings become blank lines). */
-function Info({ lines, mono, copyText, gap = 'paragraph' }: { lines: Array<string | undefined>; mono?: boolean; copyText?: string; gap?: 'paragraph' | 'line' }) {
-  const text = lines.filter((line): line is string => line !== undefined && line !== '').join(gap === 'paragraph' ? '\n\n' : '\n').trim()
+function Info({ lines, mono, copyText, gap = 'paragraph', leadParagraph = false }: { lines: Array<string | undefined>; mono?: boolean; copyText?: string; gap?: 'paragraph' | 'line'; leadParagraph?: boolean }) {
+  const kept = lines.filter((line): line is string => line !== undefined && line !== '')
+  const text = (leadParagraph && kept.length > 1
+    ? `${kept[0]}\n\n${kept.slice(1).join(gap === 'paragraph' ? '\n\n' : '\n')}`
+    : kept.join(gap === 'paragraph' ? '\n\n' : '\n')).trim()
   return (
     <Hint text={text} mono={mono} copyText={copyText} style={{ marginLeft: 6, verticalAlign: '-2px' }}>
-      <span aria-label={text} style={{ display: 'inline-flex', color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
+      <span aria-label={text} style={{ display: 'inline-flex', color: 'var(--dsw-alias-label-tertiary)', cursor: 'pointer' }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
           <circle cx="8" cy="8" r="6.3" />
           <path d="M8 7.2v4" strokeLinecap="round" />
@@ -463,6 +468,7 @@ export function ServerSection({ api }: SectionProps) {
         <div style={styles.title}>
           Processes{status.instance ? ` — ${status.instance} instance` : ''}
           <Info lines={[
+            'The processes that make up this DSH instance, with the controls for each. Nothing here changes configuration; it starts, stops and restarts what is already installed.',
             'The pieces of this DSH instance and the actions that apply to each: ↻ restart or relaunch, ■ stop or quit, ▶ launch. Hover an icon for what exactly it does.',
             'Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.',
             'ⓘ after a name shows its details; ⓘ after a PID shows the full command line. Clicking any ⓘ copies its text.',
@@ -491,7 +497,7 @@ export function ServerSection({ api }: SectionProps) {
                 <td style={table.td}>
                   <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
                   {process.title}
-                  <Info lines={process.details.map(codeifyTechnical)} gap="line" />
+                  <Info lines={[process.purpose ?? '', ...process.details.map(codeifyTechnical)]} gap="line" leadParagraph />
                 </td>
                 <td style={{ ...table.td, ...styles.mono }}>
                   {process.pid ?? '—'}
@@ -526,6 +532,7 @@ export function ServerSection({ api }: SectionProps) {
         <div style={styles.title}>
           Clients
           <Info lines={[
+            'Who is connected to this DSH right now — useful to see which device holds a live GUI and what it is looking at before restarting anything.',
             'Everyone who reached this DSH in the last 2 minutes: tailnet clients through the proxy (Tailscale login and tailnet IP) and direct loopback tabs.',
             '“Live” counts open GUI WebSockets. “Viewing” is the workspace and session of the last session-related call, not a live cursor.',
             'Hover a cell for details.',
@@ -723,6 +730,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                   : status.route === 'unavailable' ? 'Tailscale unavailable'
                     : status.enabled ? 'enabled, route off' : 'not installed'}
             <Info lines={[
+              'Makes this DSH reachable from your other devices at one HTTPS address on the tailnet, with Tailscale doing the encryption and the identity: no port forwarding, no public exposure.',
               route.text,
               `Publishes this DSH on your tailnet with \`tailscale serve\` at \`${status.mountPath}\` (HTTPS, port ${String(status.servePort)}), behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on \`${status.proxyUrl}\``}.`,
               'Only devices on the tailnet can reach it.',
@@ -752,8 +760,8 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                 <span style={styles.dot(described.color)} />
                 relay: {state}
                 <Info lines={[
+                  'Always-on doorman for the tailnet address, so opening the macOS app (or the phone) works even when DSH is not running: the relay accepts the connection, starts dsh web, and hands over once it answers.',
                   described.text,
-                  '',
                   `LaunchAgent \`${relay.label ?? ''}\`: always answers \`${relay.spec.listen}\` (what \`tailscale serve\` targets) and relays to the proxy on \`${relay.spec.backend}\`.`,
                   `When DSH is down it runs \`${relay.spec.start}\` in \`${relay.spec.cwd}\` and shows a “Starting DSH…” page until it answers.`,
                   `Logs: \`${relay.spec.logDir}\``,
@@ -784,6 +792,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
                 <span style={styles.dot(dock.color)} />
                 macOS app: {state}
                 <Info lines={[
+                  'The Dock icon for this DSH: a thin native window around the web GUI at the tailnet address, signed in by this Mac’s Tailscale identity — so it never holds a token or a cookie that can expire, unlike Safari’s “Add to Dock” web app it replaces.',
                   `\`${dockApp.path}\``,
                   `opens \`${status.url ?? '(tailnet address unknown)'}\``,
                   `falls back to \`${dockApp.fallbackUrl}\` + token when Tailscale is off`,
@@ -811,6 +820,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           Address
           <Info lines={[
+            'Where this DSH answers. The tailnet forms work from any device on your Tailscale network, the loopback form only on this Mac.',
             'Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.',
             ...addressVariants(status).map(variant => `\`${variant.url}\` — ${variant.note}`),
           ]} />
@@ -830,6 +840,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
           <div style={{ ...styles.title, flex: 1 }}>
             QR code
             <Info lines={[
+              'The way in for a device whose Tailscale login is not listed above (or that is not yours): scan once and it stays signed in.',
               'The code includes the standing access token: scanning it signs the device in for good, whatever its Tailscale user.',
               'Treat it like a password — whoever scans it can run commands on this machine.',
               'Rotate signs out every device that used the code; allowed Tailscale users are unaffected.',
@@ -846,6 +857,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
         <div style={styles.title}>
           Allowed Tailscale users
           <Info lines={[
+            'Who may use this DSH from another device without scanning the QR code: Tailscale proves each request’s login, and logins listed here are let straight in.',
             'One tailnet login per line, as shown by `tailscale whois`.',
             'A device whose verified Tailscale login is listed enters without a token; anyone else needs the QR code below.',
             status.selfLogin === undefined ? '' : `Your own login (\`${status.selfLogin}\`) is always allowed, listed or not.`,

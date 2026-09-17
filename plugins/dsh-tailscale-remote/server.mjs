@@ -208,6 +208,7 @@ export async function processTable(spec) {
     rows.push({
       id: 'relay',
       title: 'Relay',
+      purpose: 'Always-on doorman for the tailnet address. It accepts every connection so the macOS app and the phone never see “connection refused”: when DSH is running it passes bytes straight through to the proxy; when DSH is down it starts dsh web and shows a “Starting DSH…” page until it answers.',
       details: [`LaunchAgent ${relay.label ?? ''}`, `listening on ${relay.spec.listen}`, `→ proxy ${relay.spec.backend}`],
       command: facts?.command,
       pid: relay.pid,
@@ -225,13 +226,14 @@ export async function processTable(spec) {
   rows.push({
     id: 'dsh',
     title: 'dsh web',
+    purpose: 'The DeepSeek Harness server itself — agents, sessions, the web GUI and every plugin, including this pane. Everything else here exists to reach it or keep it running.',
     details: [
-      'this server',
       `http://127.0.0.1:${String(spec.port)}/`,
       `DSH_HOME ${spec.dshHome}`,
-      ...(parent === undefined ? [] : [`started by pid ${String(parent.pid)}: ${parent.command}`]),
+      ...(parent === undefined ? [] : [`started by pid ${String(parent.pid)} (${parent.command.split(' ').find(part => part.endsWith('/pnpm') || part === 'pnpm') === undefined ? 'parent' : 'the pnpm wrapper'}): ${parent.command}`]),
     ],
-    command: self?.command,
+    // ps shows argv[0] as invoked (pnpm resolved a bare `node` through PATH); for our own process the real binary is known.
+    command: [process.execPath, ...process.argv.slice(1)].join(' '),
     pid: process.pid,
     running: true,
     uptimeSeconds: Math.round(process.uptime()),
@@ -246,6 +248,7 @@ export async function processTable(spec) {
   rows.push({
     id: 'dock-app',
     title: `${spec.dockAppName}.app`,
+    purpose: 'The Dock icon for this DSH: a thin native window around the web GUI at the tailnet address, signed in by this Mac’s Tailscale identity so it never holds a token or an expiring cookie. Replaces Safari’s “Add to Dock” web app, which could not renew its 30-day cookie.',
     details: [spec.dockAppPath],
     command: dockFacts?.command,
     pid: dockPids[0],
@@ -266,7 +269,8 @@ export async function processTable(spec) {
       rows.push({
         id: 'afm',
         title: 'afm',
-        details: ['Apple Foundation model server', 'started on demand by local-model-supervisor'],
+        purpose: 'Local Apple Foundation model server: the on-device model behind the apple/* provider, so this DSH can answer without any cloud key.',
+        details: ['started on demand by local-model-supervisor, stopped when idle'],
         command: facts?.command,
         pid: afmPids[0],
         running: true,
