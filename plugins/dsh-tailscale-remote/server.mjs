@@ -33,7 +33,7 @@ function header(req, name) {
 export function describeUserAgent(ua) {
   const text = String(ua ?? '')
   if (text === '') return 'unknown'
-  if (/DSHDock\//.test(text)) return 'Dock app'
+  if (/DSHDock\//.test(text)) return 'App'
   if (/curl\//.test(text)) return 'curl'
   if (/CriOS|Chrome\//.test(text) && !/Edg\//.test(text)) return /Mobile/.test(text) ? 'Chrome mobile' : 'Chrome'
   if (/Edg\//.test(text)) return 'Edge'

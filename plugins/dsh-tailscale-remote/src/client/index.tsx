@@ -359,19 +359,19 @@ export function ServerSection({ api }: SectionProps) {
         {!status.tracking && <div style={styles.error}>Client tracking unavailable: the web server’s internal http.Server is not reachable in this DSH build.</div>}
         <table style={table.table}>
           <colgroup>
-            <col style={{ width: '27%' }} />
-            <col style={{ width: '17%' }} />
-            <col style={{ width: '12%' }} />
-            <col style={{ width: '7%' }} />
+            <col style={{ width: '18%' }} />
+            <col style={{ width: 118 }} />
+            <col style={{ width: '13%' }} />
+            <col style={{ width: '8%' }} />
             <col style={{ width: '8%' }} />
             <col style={{ width: '10%' }} />
-            <col style={{ width: '19%' }} />
+            <col />
           </colgroup>
           <thead>
             <tr>
               <th style={table.th}>Who</th>
-              <th style={table.th}>From</th>
-              <th style={table.th}>App</th>
+              <th style={table.th}>IP</th>
+              <th style={table.th}>Via</th>
               <th style={table.th}>Live</th>
               <th style={table.th}>Req</th>
               <th style={table.th}>Seen</th>
@@ -390,7 +390,7 @@ export function ServerSection({ api }: SectionProps) {
                     : client.login.replace(/@.*$/, '')}
                   {client.self && <span style={table.tag}>this Mac</span>}
                 </td>
-                <td style={{ ...table.td, ...styles.mono }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
+                <td style={{ ...table.td, ...styles.mono, fontSize: 11, letterSpacing: '-0.03em', overflow: 'visible', textOverflow: 'clip' }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
                 <td style={table.td} title={client.userAgent}>{client.agent}</td>
                 <td style={table.td} title="open GUI WebSockets">{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
                 <td style={table.td}>{client.requests}</td>
