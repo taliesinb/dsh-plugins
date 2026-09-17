@@ -252,11 +252,15 @@ export function apply(ctx, config) {
     if (result.ok) return result.value
     throw new Error(`${what}: ${result.error?.message ?? result.error?.code ?? 'failed'}`)
   }
-  const sessionRow = (item) => ({
+  const sessionRow = (item, remoteIndex) => ({
     id: item.sessionId,
     title: item.projections?.values?.title ?? '',
     updatedAt: new Date(Number(item.updatedAt) || 0).toISOString(),
     running: item.running === true,
+    // The remote's account order is creation order for a workspace whose
+    // rows were never dragged; `session.list` carries no createdAt.
+    remoteIndex,
+    ...(item.projections?.values?.permissions === undefined ? {} : { permissions: item.projections.values.permissions }),
   })
 
   /** Confirm the remote accepts this host: exchange the token if any, then list its sessions. */
@@ -383,9 +387,10 @@ export function apply(ctx, config) {
     const listed = must(await egress.call('session', 'list', { _request: {} }), 'session.list')
     const byId = new Map((listed.items ?? []).map(item => [item.sessionId, item]))
     const visible = view.sessionIds.filter(id => byId.has(id) && !archived.has(id) && byId.get(id).blank !== true)
-    const sessions = applySessionOrder(visible, workspace.sessionOrder).map(id => sessionRow(byId.get(id)))
+    const sessions = applySessionOrder(visible, workspace.sessionOrder).map(id => sessionRow(byId.get(id), view.sessionIds.indexOf(id)))
     workspace.remotePath = view.path
     workspace.remoteTitle = view.title
+    workspace.remoteCreatedAt = view.createdAt
     workspace.cache = { sessions, polledAt: new Date().toISOString() }
     const server = state.servers.find(candidate => candidate.id === workspace.serverId)
     if (server !== undefined) server.lastUsedAt = workspace.cache.polledAt

@@ -14,9 +14,20 @@ export interface RemoteSelection {
   sessionId: string
 }
 
+/** How the Remotes section arranges rows (mirrors the local tree's View options). */
+export type RemoteGroupBy = 'workspace' | 'server' | 'flat'
+export type RemoteOrderBy = 'manual' | 'updated' | 'created'
+
+/** Poll cadence for every mirrored workspace while a view needs them all current. */
+export const FLAT_POLL_INTERVAL_MS = 60_000
+
 export interface ViewState {
   /** Expanded remote workspaces; absent = collapsed (no network until opened). */
   expanded: Record<string, boolean>
+  /** Expanded server groups (server view); absent = expanded. */
+  serverExpanded?: Record<string, boolean>
+  groupBy?: RemoteGroupBy
+  orderBy?: RemoteOrderBy
   selected?: RemoteSelection
   /** Whether the remote panel (not a local Conversation) was the last thing shown; restored on reload. */
   remoteActive?: boolean
@@ -276,6 +287,18 @@ export class RemoteWorkspacesModel {
     this.putWorkspace(workspace)
     this.view.update((d) => { d.expanded[workspace.id] = true })
     return workspace
+  }
+
+  setGroupBy(groupBy: RemoteGroupBy): void {
+    this.view.update((d) => { d.groupBy = groupBy })
+  }
+
+  setOrderBy(orderBy: RemoteOrderBy): void {
+    this.view.update((d) => { d.orderBy = orderBy })
+  }
+
+  setServerExpanded(serverId: string, expanded: boolean): void {
+    this.view.update((d) => { d.serverExpanded = { ...d.serverExpanded, [serverId]: expanded } })
   }
 
   openMove(request: MoveRequest | undefined): void {

@@ -62,6 +62,8 @@ function normalizeWorkspace(raw, serverIds) {
           id: entry.id, title: String(entry.title ?? ''),
           ...(typeof entry.updatedAt === 'string' ? { updatedAt: entry.updatedAt } : {}),
           ...(entry.running === true ? { running: true } : {}),
+          ...(Number.isInteger(entry.remoteIndex) ? { remoteIndex: entry.remoteIndex } : {}),
+          ...(typeof entry.permissions === 'object' && entry.permissions !== null ? { permissions: entry.permissions } : {}),
         }]
       : []))
     : []
@@ -72,6 +74,7 @@ function normalizeWorkspace(raw, serverIds) {
     title: String(raw.title ?? remoteWorkspaceId),
     remotePath: String(raw.remotePath ?? ''),
     ...(typeof raw.remoteTitle === 'string' ? { remoteTitle: raw.remoteTitle } : {}),
+    ...(typeof raw.remoteCreatedAt === 'string' ? { remoteCreatedAt: raw.remoteCreatedAt } : {}),
     createdAt: typeof raw.createdAt === 'string' ? raw.createdAt : new Date(0).toISOString(),
     order: Number.isFinite(raw.order) ? Number(raw.order) : 0,
     /** Local manual session order (ids); sessions absent from it keep the remote's order ahead of it. */

@@ -22,8 +22,9 @@ import type { MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
-import type { ProbeResult, RemoteApi, RemoteWorkspace } from './api.ts'
-import { PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
+import type { ProbeResult, RemoteApi, RemoteWorkspace, ServerInfo } from './api.ts'
+import { FLAT_POLL_INTERVAL_MS, PANEL_ID, type RemoteSelection, type RemoteWorkspacesModel, type RuntimeState, type ViewState } from './store.ts'
+import { byServer, flatten, orderSessions, orderWorkspaces, relativeLabel, ServerHover, SessionHover, ViewOptions, WorkspaceHover } from './view.tsx'
 
 /** Inject face every component of this plugin receives. */
 export interface RemoteInjected {
@@ -199,7 +200,7 @@ function shortId(id: string): string {
   return id.replace(/^session-/, '').slice(0, 8)
 }
 
-function SessionRow({ workspace, session, selected, busy, openRemoteSession, model, drag, order }: {
+function SessionRow({ workspace, session, selected, busy, openRemoteSession, model, drag, order, caption, now, reorderable = true }: {
   workspace: RemoteWorkspace
   session: RemoteWorkspace['cache']['sessions'][number] & { placeholder?: boolean }
   selected: boolean
@@ -207,9 +208,14 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
   drag: DragState
   /** Current ids of this group's rows, for computing the dropped order. */
   order: readonly string[]
+  /** Context shown under the title when the row is not under its own workspace header (server / flat views). */
+  caption?: string | undefined
+  now: number
+  /** Manual order only: drag handles and drop targets. */
+  reorderable?: boolean
 } & Pick<Face, 'openRemoteSession' | 'model'>) {
   const dragKey = `session:${session.id}`
-  const compatible = drag.item?.kind === 'session' && drag.item.workspaceId === workspace.id && drag.item.id !== session.id
+  const compatible = reorderable && drag.item?.kind === 'session' && drag.item.workspaceId === workspace.id && drag.item.id !== session.id
   const [hover, setHover] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [rename, setRename] = useState<string | null>(null)
@@ -239,13 +245,13 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
       setRenameError(error instanceof Error ? error.message : String(error))
     } finally { setPending(false) }
   }
-  return (
-    <>
+  const time = session.placeholder === true ? '' : relativeLabel(session.updatedAt, now)
+  const row = (
       <div
         role="treeitem"
         aria-selected={selected}
-        draggable={session.placeholder !== true}
-        style={{ ...S.sessionRow, ...NO_SELECT, ...dropStyle(drag, dragKey), background: selected || hover ? HOVER : 'transparent', opacity: pending || drag.item?.id === session.id ? 0.6 : 1 }}
+        draggable={reorderable && session.placeholder !== true}
+        style={{ ...S.sessionRow, ...NO_SELECT, ...dropStyle(drag, dragKey), height: caption === undefined ? 32 : 44, background: selected || hover ? HOVER : 'transparent', opacity: pending || drag.item?.id === session.id ? 0.6 : 1 }}
         onMouseEnter={() => { setHover(true) }}
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { openRemoteSession({ workspaceId: workspace.id, sessionId: session.id }) }}
@@ -264,11 +270,14 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
           drag.end()
         }}
       >
-        <span style={S.slot}>{busy ? <Spinner /> : null}</span>
-        <span style={S.sessionTitle} title={session.title || session.id}>
-          {session.title || <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>}
+        <span style={S.slot}>{busy ? <Spinner /> : session.running === true ? <span style={{ width: 6, height: 6, borderRadius: 3, background: 'var(--dsw-alias-state-business-primary)' }} /> : null}</span>
+        <span style={{ ...S.sessionTitle, display: 'flex', flexDirection: 'column', gap: 1, lineHeight: '18px' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {session.title || <span style={S.muted}>{'placeholder' in session && session.placeholder === true ? 'New session' : `Untitled · ${shortId(session.id)}`}</span>}
+          </span>
+          {caption !== undefined && <span style={{ ...S.muted, fontSize: 11, lineHeight: '14px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{caption}</span>}
         </span>
-        {session.running === true && <span style={{ ...S.muted, fontSize: 11 }}>running</span>}
+        {!hover && !menuOpen && time !== '' && <span style={{ ...S.muted, fontSize: 12, flex: 'none' }}>{time}</span>}
         <span style={{ ...S.rowActions, display: hover || menuOpen ? 'inline-flex' : 'none' }} onClick={(event) => { event.stopPropagation() }}>
           <Menu
             open={menuOpen}
@@ -291,6 +300,10 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
           />
         </span>
       </div>
+  )
+  return (
+    <>
+      <SessionHover anchor={row} session={session} workspace={workspace} now={now} disabled={menuOpen || drag.item !== null} />
       <Modal
         open={rename !== null}
         onClose={() => { setRename(null) }}
@@ -311,9 +324,17 @@ function SessionRow({ workspace, session, selected, busy, openRemoteSession, mod
   )
 }
 
-function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag, groupOrder }: { workspace: RemoteWorkspace; drag: DragState; groupOrder: readonly string[] } & Face) {
+function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag, groupOrder, now, hideServerInHover = false }: {
+  workspace: RemoteWorkspace
+  drag: DragState
+  groupOrder: readonly string[]
+  now: number
+  hideServerInHover?: boolean
+} & Face) {
   const dragKey = `group:${workspace.id}`
-  const compatible = drag.item?.kind === 'group' && drag.item.id !== workspace.id
+  const orderBy = useView(state => state.orderBy ?? 'manual')
+  const reorderable = orderBy === 'manual'
+  const compatible = reorderable && drag.item?.kind === 'group' && drag.item.id !== workspace.id
   const expanded = useView(state => state.expanded[workspace.id] === true)
   const selected = useView(state => state.selected)
   const polling = useRuntime(state => state.polling.includes(workspace.id))
@@ -346,20 +367,19 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
   // yet; while it is the selection, pin a placeholder row like the local tree
   // pins its current blank session.
   const sessions = useMemo(() => {
-    const cached = workspace.cache.sessions
+    const cached = orderSessions(workspace.cache.sessions, orderBy)
     if (selected?.workspaceId === workspace.id && !cached.some(session => session.id === selected.sessionId)) {
       return [{ id: selected.sessionId, title: '', placeholder: true }, ...cached]
     }
     return cached
-  }, [workspace.cache.sessions, workspace.id, selected])
-  return (
-    <div style={S.group}>
+  }, [workspace.cache.sessions, workspace.id, selected, orderBy])
+  void hideServerInHover
+  const header = (
       <div
         role="treeitem"
         aria-expanded={expanded}
-        draggable
+        draggable={reorderable}
         style={{ ...S.groupRow, ...NO_SELECT, ...dropStyle(drag, dragKey), background: hover || menuOpen ? HOVER : 'transparent', opacity: drag.item?.kind === 'group' && drag.item.id === workspace.id ? 0.6 : 1 }}
-        title={`${serverLabel} · ${workspace.remotePath}`}
         onMouseEnter={() => { setHover(true) }}
         onMouseLeave={() => { setHover(false) }}
         onClick={() => { model.setExpanded(workspace.id, !expanded) }}
@@ -387,6 +407,11 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
         <span style={S.groupTitle}>{workspace.title}</span>
         {workspace.cache.gone === true && <span style={{ ...S.muted, fontSize: 11 }}>gone</span>}
         {polling && !hover && <Spinner size={12} />}
+        {!polling && !hover && !menuOpen && (
+          <span style={{ ...S.muted, fontSize: 11, flex: 'none' }}>
+            {workspace.cache.polledAt === undefined ? '' : relativeLabel(workspace.cache.polledAt, now)}
+          </span>
+        )}
         <span style={{ ...S.rowActions, display: hover || menuOpen ? 'inline-flex' : 'none' }}>
           <RowButton label="Refresh from remote" disabled={polling} onClick={() => { void model.poll(workspace.id) }}>
             {polling ? <Spinner size={12} /> : <IconRefreshOutline16 />}
@@ -413,6 +438,10 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
           </RowButton>
         </span>
       </div>
+  )
+  return (
+    <div style={S.group}>
+      <WorkspaceHover anchor={header} workspace={workspace} now={now} disabled={menuOpen || drag.item !== null} />
       {expanded && (
         <div role="group">
           {sessions.length === 0 && !polling && workspace.cache.polledAt !== undefined && (
@@ -430,6 +459,8 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
               model={model}
               drag={drag}
               order={sessions.map(candidate => candidate.id)}
+              now={now}
+              reorderable={reorderable}
             />
           ))}
           {error !== undefined && <div style={S.error}>{error}</div>}
@@ -480,12 +511,31 @@ function Group({ workspace, model, openRemoteSession, useView, useRuntime, drag,
  * scroll. Header: label, refresh-all, add — nothing else.
  */
 export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> & Face) {
-  const { useRuntime, model } = props
+  const { useRuntime, useView, model } = props
   const workspaces = useRuntime(state => state.snapshot?.workspaces)
+  const servers = useRuntime(state => state.snapshot?.servers)
   const loaded = useRuntime(state => state.loaded)
   const loadError = useRuntime(state => state.loadError)
   const anyPolling = useRuntime(state => state.polling.length > 0)
+  const groupBy = useView(state => state.groupBy ?? 'workspace')
+  const orderBy = useView(state => state.orderBy ?? 'manual')
   useEffect(() => { if (!loaded) void model.refresh() }, [loaded, model])
+  // A clock for the relative labels (the local tree re-renders on its own
+  // ticks; one minute is the coarsest unit we show).
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = setInterval(() => { setNow(Date.now()) }, 30_000)
+    return () => { clearInterval(timer) }
+  }, [])
+  // Server and flat views show sessions of every workspace, so they must all
+  // be current: poll them all on entry and then periodically while the view
+  // is up (the Workspace view only polls what is expanded).
+  useEffect(() => {
+    if (groupBy === 'workspace' || (workspaces?.length ?? 0) === 0) return
+    model.pollAll()
+    const timer = setInterval(() => { model.pollAll() }, FLAT_POLL_INTERVAL_MS)
+    return () => { clearInterval(timer) }
+  }, [groupBy, model, workspaces?.length])
 
   const [item, setItem] = useState<DragItem | null>(null)
   const [over, setOver] = useState<{ key: string; half: DropHalf } | null>(null)
@@ -497,7 +547,8 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
     end: () => { setItem(null); setOver(null) },
   }), [item, over])
 
-  const groupOrder = (workspaces ?? []).map(workspace => workspace.id)
+  const ordered = orderWorkspaces(workspaces ?? [], orderBy)
+  const groupOrder = ordered.map(workspace => workspace.id)
   return (
     <div
       data-remote-workspaces
@@ -510,6 +561,7 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
       <div style={{ ...S.sectionHeader, ...NO_SELECT }}>
         <span style={S.sectionLabel}>Remotes</span>
         <span style={{ flex: '1 1 auto' }} />
+        <ViewOptions groupBy={groupBy} orderBy={orderBy} onGroupBy={mode => { model.setGroupBy(mode) }} onOrderBy={mode => { model.setOrderBy(mode) }} iconButtonStyle={S.iconButton} />
         <IconButton label="Refresh all remotes" disabled={anyPolling || (workspaces?.length ?? 0) === 0} onClick={() => { model.pollAll() }}>
           {anyPolling ? <Spinner /> : <IconRefreshOutline16 size={16} />}
         </IconButton>
@@ -523,7 +575,11 @@ export function RemotesSection(props: PropsRuntime<'sidebar.workspaces.extra'> &
         {loaded && loadError === undefined && (workspaces?.length ?? 0) === 0 && (
           <div style={{ ...S.hint, padding: '2px 8px' }}>No remote workspaces yet.</div>
         )}
-        {(workspaces ?? []).map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} {...props} />)}
+        {groupBy === 'workspace' && ordered.map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} now={now} {...props} />)}
+        {groupBy === 'server' && byServer(ordered).map(group => (
+          <ServerGroup key={group.serverId} group={group} server={servers?.find(server => server.id === group.serverId)} drag={drag} groupOrder={groupOrder} now={now} {...props} />
+        ))}
+        {groupBy === 'flat' && <FlatList workspaces={ordered} drag={drag} now={now} {...props} />}
       </div>
     </div>
   )
@@ -969,5 +1025,80 @@ export function MoveRemoteDialog({ model, localWorkspaces, useRuntime }: Face) {
         {error !== null && <div style={{ ...S.error, padding: 0 }} role="alert">{error}</div>}
       </div>
     </Modal>
+  )
+}
+
+
+// ---- server view + flat view ----------------------------------------------
+
+function ServerGroup({ group, server, drag, groupOrder, now, ...face }: {
+  group: { serverId: string; label: string; workspaces: RemoteWorkspace[] }
+  server: ServerInfo | undefined
+  drag: DragState
+  groupOrder: readonly string[]
+  now: number
+} & Face) {
+  const { model, useView } = face
+  const expanded = useView(state => state.serverExpanded?.[group.serverId] !== false)
+  const [hover, setHover] = useState(false)
+  const failure = server?.bridge?.lastFailure
+  const header = (
+    <div
+      role="treeitem"
+      aria-expanded={expanded}
+      style={{ ...S.groupRow, ...NO_SELECT, background: hover ? HOVER : 'transparent' }}
+      onMouseEnter={() => { setHover(true) }}
+      onMouseLeave={() => { setHover(false) }}
+      onClick={() => { model.setServerExpanded(group.serverId, !expanded) }}
+    >
+      <span style={{ ...S.slot, color: failure === undefined ? 'var(--dsw-alias-state-business-primary)' : 'var(--dsw-alias-state-warning-primary, var(--dsw-alias-label-caption))' }}>
+        {hover
+          ? <span style={{ display: 'inline-flex', transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ds-ease-in-out)', color: 'var(--dsw-alias-label-caption)' }}><IconTriangleRightFill14 /></span>
+          : <IconGlobeOutline14 />}
+      </span>
+      <span style={S.groupTitle}>{group.label}</span>
+      <span style={{ ...S.muted, fontSize: 11, flex: 'none' }}>{String(group.workspaces.length)} ws</span>
+    </div>
+  )
+  return (
+    <div style={S.group}>
+      <ServerHover anchor={header} server={server} workspaces={group.workspaces} now={now} disabled={drag.item !== null} />
+      {expanded && (
+        <div role="group" style={{ paddingLeft: 12 }}>
+          {group.workspaces.map(workspace => <Group key={workspace.id} workspace={workspace} drag={drag} groupOrder={groupOrder} now={now} hideServerInHover {...face} />)}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function FlatList({ workspaces, drag, now, ...face }: { workspaces: readonly RemoteWorkspace[]; drag: DragState; now: number } & Face) {
+  const { model, openRemoteSession, useView, useRuntime } = face
+  const orderBy = useView(state => state.orderBy ?? 'manual')
+  const selected = useView(state => state.selected)
+  const polling = useRuntime(state => state.polling)
+  const rows = useMemo(() => flatten(workspaces, orderBy), [workspaces, orderBy])
+  if (rows.length === 0) {
+    return <div style={{ ...S.hint, padding: '2px 8px' }}>{polling.length > 0 ? 'Reaching remotes…' : 'No remote sessions.'}</div>
+  }
+  return (
+    <div role="group">
+      {rows.map(({ session, workspace }) => (
+        <SessionRow
+          key={`${workspace.id}:${session.id}`}
+          workspace={workspace}
+          session={session}
+          busy={polling.includes(workspace.id)}
+          selected={selected?.workspaceId === workspace.id && selected.sessionId === session.id}
+          openRemoteSession={openRemoteSession}
+          model={model}
+          drag={drag}
+          order={[]}
+          caption={`${workspace.title} · ${workspace.server?.label ?? workspace.serverId}`}
+          now={now}
+          reorderable={false}
+        />
+      ))}
+    </div>
   )
 }

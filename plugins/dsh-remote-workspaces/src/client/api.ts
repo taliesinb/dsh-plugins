@@ -30,6 +30,10 @@ export interface CachedSession {
   title: string
   updatedAt?: string
   running?: boolean
+  /** Position in the remote workspace's account (creation order unless dragged there). */
+  remoteIndex?: number
+  /** The remote's `permissions` projection value, when it listed one. */
+  permissions?: unknown
 }
 
 export interface RemoteWorkspace {
@@ -40,6 +44,8 @@ export interface RemoteWorkspace {
   title: string
   remotePath: string
   remoteTitle?: string
+  /** The remote workspace's own registration time. */
+  remoteCreatedAt?: string
   createdAt: string
   order: number
   sessionOrder?: string[]

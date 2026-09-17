@@ -30,6 +30,26 @@ Design and status: `../../notes/remote-workspaces-plan.md`.
   identity mode. **Later:** title sync without ↻ (postMessage from the embed),
   interleaving remote groups with local ones, remote workspace path browsing.
 
+## View options and hover cards
+
+The section header carries the same View-options icon as the local tree:
+**Group by** Workspace (default; collapsed groups cost no network), Server
+(one collapsible group per remote, workspaces nested), or In one list
+(every remote session, newest first, with a `workspace · server` caption);
+**Order by** Manual (the persisted drag order / the remote's order), Last
+updated, or Last created (the remote account's position — `session.list`
+carries no createdAt). Manual is the only order with drag handles. Server
+and flat views need every workspace current, so entering them polls all of
+them and then every 60 s while the view is up (`FLAT_POLL_INTERVAL_MS`).
+
+Hovering shows a card like the local rows': a session → title, `workspace ·
+server`, relative time, Running/Idle dot, permission mode when the remote
+listed one; a workspace → title, `server:path`, the remote's own name when
+it differs, its registration time, session count and when it was last
+fetched (copy = path); a server → label, URL, workspace/session counts, auth
+mode and last bridge failure (copy = URL). Persisted view state:
+`groupBy`, `orderBy`, `serverExpanded` in `dsh.remote-workspaces.view`.
+
 ## Moving sessions across hosts
 
 Every remote session row's `…` menu has **Move to…**; every local session row
