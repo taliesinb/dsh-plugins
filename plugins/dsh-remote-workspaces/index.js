@@ -22,7 +22,7 @@
  */
 import os from 'node:os'
 import Schema from '@deepseek-ai/schemastery'
-import { createEgress, parseRemoteUrl } from './egress.mjs'
+import { createEgress, friendlyRemoteName, parseRemoteUrl } from './egress.mjs'
 import { defaultStateFile, generateId, loadState, normalizeState, routeIdFor, saveState } from './state.mjs'
 
 export const name = 'remote-workspaces'
@@ -324,7 +324,7 @@ export function apply(ctx, config) {
       url: remote.url,
       hostname: remote.hostname,
       serverId: known?.id,
-      label: known?.label ?? remote.hostname.split('.')[0],
+      label: known?.label ?? friendlyRemoteName(remote.url),
       elapsedMs: Date.now() - started,
       mode: egress.status().mode,
       workspaces: items.map(view => ({
@@ -350,7 +350,7 @@ export function apply(ctx, config) {
     }
     if (server === undefined) {
       const taken = new Set([...state.servers.map(candidate => candidate.id), ...seeds.keys()])
-      server = { id: routeIdFor(label || remote.hostname.split('.')[0], taken), url: remote.url, label: label || remote.hostname.split('.')[0] }
+      server = { id: routeIdFor(label || friendlyRemoteName(remote.url), taken), url: remote.url, label: label || friendlyRemoteName(remote.url) }
       state.servers.push(server)
     }
     if (offeredToken !== undefined) server.token = offeredToken
@@ -702,6 +702,18 @@ export function apply(ctx, config) {
   const boot = (async () => {
     try {
       state = await loadState(stateFile)
+      // Servers labelled by the old derivation (bare first hostname label,
+      // e.g. "127") get the friendly name; ids stay so routes and frames hold.
+      let relabelled = false
+      for (const server of state.servers) {
+        let remote
+        try { remote = parseRemoteUrl(server.url) } catch { continue }
+        if (server.label === remote.hostname.split('.')[0] && server.label !== friendlyRemoteName(server.url)) {
+          server.label = friendlyRemoteName(server.url)
+          relabelled = true
+        }
+      }
+      if (relabelled) await persist()
     } catch (error) {
       warn(String(error?.message ?? error))
     }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createServer, request as httpRequest } from 'node:http'
 import { after, before, describe, it } from 'node:test'
-import { createEgress, parseRemoteUrl, rewriteLocation } from '../egress.mjs'
+import { createEgress, parseRemoteUrl, rewriteLocation, friendlyRemoteName } from '../egress.mjs'
 
 /**
  * A fake remote DSH mounted at `/dsh`: `GET /dsh/?token=T` mints a cookie,
@@ -233,5 +233,16 @@ describe('createEgress against a fake remote', () => {
       assert.equal(res.status, 401, 'the fake remote refused: no cookie was invented')
       assert.equal(open.seen.filter(entry => entry.path === '/dsh/').length, 0, 'no token exchange attempted')
     } finally { await mount.close(); await open.close() }
+  })
+})
+
+describe('friendlyRemoteName', () => {
+  it('names loopback "localhost", drops default ports, keeps the mount path, and shortens tailnet MagicDNS names', () => {
+    assert.equal(friendlyRemoteName('http://127.0.0.1:3082/'), 'localhost:3082')
+    assert.equal(friendlyRemoteName('http://localhost/dsh/'), 'localhost/dsh')
+    assert.equal(friendlyRemoteName('https://alpha.tailbce956.ts.net/dsh/'), 'alpha/dsh')
+    assert.equal(friendlyRemoteName('https://alpha.tailbce956.ts.net:8443/'), 'alpha:8443')
+    assert.equal(friendlyRemoteName('https://box.example.com:8443/dsh'), 'box.example.com:8443/dsh')
+    assert.equal(friendlyRemoteName('http://192.168.0.42:3080/'), '192.168.0.42:3080')
   })
 })

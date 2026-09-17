@@ -98,6 +98,18 @@ would need a shared dataTransfer type in the fork's rows).
         token: ''                    # '' = rely on tailnet identity at the remote
 ```
 
+## Server names
+
+A remote's default label is `friendlyRemoteName(url)` (egress.mjs): loopback →
+`localhost`, a MagicDNS tailnet host → its first label (`alpha` for
+`alpha.tailbce956.ts.net`), otherwise the hostname; the port is appended
+unless it is the scheme's default, and the mount path is kept because one
+host may serve several instances (`localhost:3082`, `alpha/dsh`,
+`box.example.com:8443/dsh`). The user's own label (add-modal, rename) wins.
+Servers stored under the old derivation (bare first hostname label, e.g.
+`127`) are relabelled once on load. The add-modal's suggested workspace name
+uses the label with `:`/`/` turned into dashes (`alpha-dsh-<workspace>`).
+
 ## Facts worth keeping
 
 - The embedded shell computes every Host URL relative to its document directory,

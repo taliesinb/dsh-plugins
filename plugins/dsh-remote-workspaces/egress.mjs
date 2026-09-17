@@ -61,6 +61,25 @@ export function parseRemoteUrl(url) {
 }
 
 /**
+ * A human-friendly default label for a remote: `localhost:3082`,
+ * `localhost/dsh` (default port), `alpha/dsh` for a MagicDNS tailnet name
+ * (`alpha.tailbce956.ts.net`), `box.example.com:8443/dsh` otherwise. The port
+ * is omitted when it is the scheme's default; the mount path is kept because
+ * one host can serve several DSH instances under different paths.
+ * @param {string} url
+ * @returns {string}
+ */
+export function friendlyRemoteName(url) {
+  const remote = parseRemoteUrl(url)
+  let host = remote.hostname
+  if (host === '127.0.0.1' || host === '::1' || host === '[::1]' || host === 'localhost') host = 'localhost'
+  else if (/\.ts\.net$/u.test(host)) host = host.split('.')[0]
+  const defaultPort = remote.secure ? 443 : 80
+  const port = remote.port === defaultPort ? '' : `:${String(remote.port)}`
+  return `${host}${port}${remote.basePath}`
+}
+
+/**
  * Map an upstream `Location` back under the local mount.
  * @param {string} value the header value
  * @param {{ origin: string, basePath: string }} remote
