@@ -241,8 +241,9 @@ function ActionIcon({ id }: { id: string }) {
  * WKWebView Dock app). Fixed-positioned so cells with overflow:hidden cannot
  * clip it; opens on hover or keyboard focus.
  */
-function Hint({ text, children, style }: { text: string; children: ReactNode; style?: CSSProperties }) {
+function Hint({ text, children, style, mono, copyText }: { text: string; children: ReactNode; style?: CSSProperties; mono?: boolean; copyText?: string }) {
   const [anchor, setAnchor] = useState<{ left: number; top: number; bottom: number } | undefined>(undefined)
+  const [copied, setCopied] = useState(false)
   const [placed, setPlaced] = useState<{ left: number; top: number } | undefined>(undefined)
   const card = useRef<HTMLDivElement | null>(null)
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -271,13 +272,19 @@ function Hint({ text, children, style }: { text: string; children: ReactNode; st
     setPlaced({ left, top })
   }, [anchor, text])
   const trimmed = text.trim()
+  const copy = async () => {
+    const ok = await writeClipboard(copyText ?? trimmed)
+    setCopied(ok)
+    setTimeout(() => setCopied(false), 1200)
+  }
   return (
     <span
-      style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom', ...style }}
+      style={{ display: 'inline-block', maxWidth: '100%', verticalAlign: 'bottom', cursor: trimmed === '' ? undefined : 'copy', ...style }}
       onMouseEnter={show}
       onMouseLeave={hide}
       onFocus={show}
       onBlur={hide}
+      onClick={(event) => { if (trimmed !== '') { event.stopPropagation(); void copy() } }}
       tabIndex={trimmed === '' ? undefined : 0}
     >
       {children}
@@ -288,24 +295,46 @@ function Hint({ text, children, style }: { text: string; children: ReactNode; st
           style={{
             position: 'fixed', left: placed?.left ?? anchor.left, top: placed?.top ?? anchor.bottom + 6, zIndex: 10000,
             visibility: placed === undefined ? 'hidden' : 'visible',
-            maxWidth: 360, padding: '8px 11px', borderRadius: 10, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere',
-            font: '12px/17px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
+            maxWidth: mono ? 560 : 360, padding: '8px 11px', borderRadius: 10, whiteSpace: 'pre-wrap', overflowWrap: mono ? 'normal' : 'anywhere',
+            font: mono ? '11px/16px ui-monospace, SFMono-Regular, Menlo, monospace' : '12px/17px -apple-system, system-ui, sans-serif',
+            color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
             background: 'var(--dsw-alias-bg-module-float, var(--dsw-alias-bg-module-platform, #2a2a2c))', border: '0.5px solid var(--dsw-alias-border-l3, var(--dsw-alias-border-l4))',
             boxShadow: '0 8px 28px rgba(0,0,0,.28), 0 1px 3px rgba(0,0,0,.2)', pointerEvents: 'none',
           }}
         >
           {trimmed}
+          <div style={{ marginTop: 6, font: '11px/14px -apple-system, system-ui, sans-serif', color: 'var(--dsw-alias-label-tertiary)' }}>{copied ? 'Copied' : 'Click to copy'}</div>
         </div>
       )}
     </span>
   )
 }
 
+/**
+ * A `ps` command line as display lines: the binary on its own first line
+ * (path components joined by spaces stay together), then one argument per
+ * line with its value (`--listen 127.0.0.1:3085`); a new path starts a new
+ * line. Only ever splits on spaces.
+ */
+export function commandLines(command: string): string[] {
+  const tokens = command.trim().split(' ').filter(Boolean)
+  const lines: string[] = []
+  for (const [index, token] of tokens.entries()) {
+    const last = lines[lines.length - 1]
+    if (index === 0 || last === undefined) lines.push(token)
+    else if (token.startsWith('-')) lines.push(token)
+    else if (/^--?[\w-]+$/.test(last)) lines[lines.length - 1] = `${last} ${token}`
+    else if (token.startsWith('/') || token.startsWith('~')) lines.push(token)
+    else lines[lines.length - 1] = `${last} ${token}`
+  }
+  return lines
+}
+
 /** Small circled "i" whose hover card shows `lines` (empty strings become blank lines). */
-function Info({ lines }: { lines: Array<string | undefined> }) {
-  const text = lines.filter((line): line is string => line !== undefined && line !== '').join('\n\n').trim()
+function Info({ lines, mono, copyText, gap = 'paragraph' }: { lines: Array<string | undefined>; mono?: boolean; copyText?: string; gap?: 'paragraph' | 'line' }) {
+  const text = lines.filter((line): line is string => line !== undefined && line !== '').join(gap === 'paragraph' ? '\n\n' : '\n').trim()
   return (
-    <Hint text={text} style={{ marginLeft: 6, verticalAlign: '-2px' }}>
+    <Hint text={text} mono={mono} copyText={copyText} style={{ marginLeft: 6, verticalAlign: '-2px' }}>
       <span aria-label={text} style={{ display: 'inline-flex', color: 'var(--dsw-alias-label-tertiary)', cursor: 'help' }}>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true">
           <circle cx="8" cy="8" r="6.3" />
@@ -316,8 +345,6 @@ function Info({ lines }: { lines: Array<string | undefined> }) {
     </Hint>
   )
 }
-
-const ICON_LEGEND: Array<[string, string]> = [['restart', 'restart / relaunch'], ['stop', 'stop / quit'], ['launch', 'launch']]
 
 export function ServerSection({ api }: SectionProps) {
   const [status, setStatus] = useState<ServerStatus | undefined>(undefined)
@@ -381,7 +408,14 @@ export function ServerSection({ api }: SectionProps) {
   return (
     <div style={styles.section}>
       <div style={styles.group}>
-        <div style={styles.title}>Processes{status.instance ? ` — ${status.instance} instance` : ''}</div>
+        <div style={styles.title}>
+          Processes{status.instance ? ` — ${status.instance} instance` : ''}
+          <Info lines={[
+            'The pieces of this DSH instance and the actions that apply to each: ↻ restart or relaunch, ■ stop or quit, ▶ launch. Hover an icon for what exactly it does.',
+            'Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.',
+            'ⓘ after a name shows its details; ⓘ after a PID shows the full command line. Clicking any ⓘ copies its text.',
+          ]} />
+        </div>
         <table style={table.table}>
           <colgroup>
             <col style={{ width: '34%' }} />
@@ -403,12 +437,14 @@ export function ServerSection({ api }: SectionProps) {
             {status.processes.map(process => (
               <tr key={process.id}>
                 <td style={table.td}>
-                  <Hint text={process.details.join('\n')}>
-                    <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
-                    {process.title}
-                  </Hint>
+                  <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
+                  {process.title}
+                  <Info lines={process.details} gap="line" />
                 </td>
-                <td style={{ ...table.td, ...styles.mono }}><Hint text={process.command ?? ''}>{process.pid ?? '—'}</Hint></td>
+                <td style={{ ...table.td, ...styles.mono }}>
+                  {process.pid ?? '—'}
+                  {process.command !== undefined && <Info lines={commandLines(process.command)} mono copyText={process.command} gap="line" />}
+                </td>
                 <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
                 <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
                 <td style={{ ...table.td, textAlign: 'right' }}>
@@ -432,17 +468,17 @@ export function ServerSection({ api }: SectionProps) {
         </table>
         {message !== undefined && <div style={styles.caption}>{message}</div>}
         {error !== undefined && <div style={styles.error}>{error}</div>}
-        <div style={styles.caption}>
-          Hover a process name for its details, its PID for the full command, and{' '}
-          {ICON_LEGEND.map(([id, meaning]) => (
-            <Hint key={id} text={meaning} style={{ verticalAlign: 'middle', marginRight: 2 }}><span style={{ display: 'inline-flex' }}><ActionIcon id={id} /></span></Hint>
-          ))}
-          {' '}for what each does. Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.
-        </div>
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>Clients</div>
+        <div style={styles.title}>
+          Clients
+          <Info lines={[
+            'Everyone who reached this DSH in the last 2 minutes: tailnet clients through the proxy (Tailscale login and tailnet IP) and direct loopback tabs.',
+            '“Live” counts open GUI WebSockets. “Viewing” is the workspace and session of the last session-related call, not a live cursor.',
+            'Hover a cell for details.',
+          ]} />
+        </div>
         {!status.tracking && <div style={styles.error}>Client tracking unavailable: the web server’s internal http.Server is not reachable in this DSH build.</div>}
         <table style={table.table}>
           <colgroup>
@@ -500,9 +536,7 @@ export function ServerSection({ api }: SectionProps) {
             ))}
           </tbody>
         </table>
-        <div style={styles.caption}>
-          Everyone who reached this DSH in the last 2 minutes — tailnet clients through the proxy (Tailscale login, tailnet IP) and direct loopback tabs. Hover a cell for details; “Viewing” is the workspace and session of the last session-related call, not a live cursor.
-        </div>
+
       </div>
     </div>
   )
