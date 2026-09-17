@@ -224,6 +224,12 @@ export async function uninstallRelayAgent({ instance = '', log = () => {} } = {}
   return { removed }
 }
 
+/** Unload the relay without removing its plist (a later `installRelayAgent` or login brings it back). */
+export async function stopRelayAgent(instance = '') {
+  const result = await launchctl(['bootout', `${domain()}/${labelFor(instance)}`])
+  if (result.code !== 0 && !/No such process|not find/i.test(result.stderr)) throw new Error(`launchctl bootout failed: ${result.stderr.trim()}`)
+}
+
 /** Restart the relay (and with it the DSH it spawned, which the relay stops on SIGTERM). */
 export async function restartRelayAgent(instance = '') {
   const result = await launchctl(['kickstart', '-k', `${domain()}/${labelFor(instance)}`])

@@ -43,9 +43,10 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { renderSVG } from 'uqr'
-import { dockAppStatus, installDockApp, uninstallDockApp } from './dock-app.mjs'
+import { bundlePathFor, dockAppStatus, installDockApp, uninstallDockApp } from './dock-app.mjs'
 import { startProxy } from './proxy.mjs'
-import { defaultLogDir, installRelayAgent, relayStatus, uninstallRelayAgent } from './relay/launch-agent.mjs'
+import { defaultLogDir, installRelayAgent, relayStatus, restartRelayAgent, stopRelayAgent, uninstallRelayAgent } from './relay/launch-agent.mjs'
+import { attachClientTracker, performAction, processTable, workspaceOfSession } from './server.mjs'
 import { defaultStateFile, generateToken, loadState, parseUserList, saveState } from './state.mjs'
 import { createTailscaleManager, normalizeMountPath } from './tailscale.mjs'
 
@@ -373,7 +374,56 @@ export function apply(ctx, config) {
     return ok(await snapshot())
   })
 
-  // ---- control channel (never forwarded by the proxy) --------------------
+  // ---- Server pane: clients seen by DSH's own http.Server + this instance's processes
+  // `server` is a TypeScript-private field of the WebServer service; from JS
+  // it is plain property access. Guarded so a rename degrades to "no client
+  // table" rather than a failed load.
+  const httpServer = /** @type {any} */ (ctx.webServer).server
+  const tracker = typeof httpServer?.on === 'function' ? attachClientTracker(httpServer) : undefined
+  if (tracker !== undefined) ctx.effect(() => () => tracker.dispose(), 'tailscale-remote: client tracker')
+  const dshHome = process.env.DSH_HOME || join(homedir(), '.dsh')
+  const workspaceCache = new Map()
+  const serverStatus = async () => {
+    const relay = config.publishPort !== 0 ? await relayStatus({ listenPort: config.publishPort, instance }) : undefined
+    const processes = await processTable({
+      relay: relay === undefined ? undefined : { ...relay, spec: relaySpec() },
+      dockAppPath: bundlePathFor(config.dockAppName),
+      dockAppName: config.dockAppName,
+      port: ctx.webServer.port,
+      dshHome,
+    })
+    const clients = []
+    for (const row of tracker?.snapshot() ?? []) {
+      let workspace
+      const sessionId = row.lastSession?.sessionId
+      if (sessionId !== undefined) {
+        workspace = workspaceCache.get(sessionId) ?? await workspaceOfSession(sessionId, dshHome)
+        if (workspace !== undefined) workspaceCache.set(sessionId, workspace)
+      }
+      clients.push({ ...row, lastSession: row.lastSession === undefined ? undefined : { ...row.lastSession, workspace: workspace ?? row.lastSession.cwd } })
+    }
+    return { instance, tracking: tracker !== undefined, processes, clients, now: Date.now() }
+  }
+  const serverAct = args => exclusive(async () => {
+    const target = String(args.target ?? '')
+    const action = String(args.action ?? '')
+    try {
+      const outcome = await performAction({ target, action }, {
+        relayInstance: instance,
+        dockAppPath: bundlePathFor(config.dockAppName),
+        dockAppName: config.dockAppName,
+        restartRelay: () => restartRelayAgent(instance),
+        stopRelay: () => stopRelayAgent(instance),
+        deferSelf: fn => setTimeout(fn, 400),
+        log,
+      })
+      return ok({ ...outcome, ...(await serverStatus()) })
+    } catch (error) {
+      return fail('server-act', String(error?.message ?? error))
+    }
+  })
+
+  // ---- control channel (forwarded by the proxy for this node's own requests only) ----
   // Registered straight on the web server with DSH's own request gate
   // (Host/Origin fence + browser-session cookie) rather than through
   // `ctx.connection.rpc.handle`: that helper resolves `webServer` through the
@@ -394,6 +444,8 @@ export function apply(ctx, config) {
       case 'uninstall-dock-app': return uninstallDock()
       case 'install-relay': return installRelay()
       case 'uninstall-relay': return uninstallRelay()
+      case 'server-status': return ok(await serverStatus())
+      case 'server-act': return serverAct(args)
       default: return fail('unknown-endpoint', `unknown endpoint ${endpoint}`)
     }
   }

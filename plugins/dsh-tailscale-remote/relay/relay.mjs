@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url'
 const HEAD_LIMIT = 64 * 1024
 const HEAD_TIMEOUT_MS = 5000
 const CONNECT_TIMEOUT_MS = 1500
-/** A DSH run that exits sooner than this after spawning counts as a failed start. */
+/** A DSH run that exits sooner than this after spawning, without its proxy port ever answering, counts as a failed start. */
 const FAST_EXIT_MS = 30_000
 
 /** @typedef {{ host: string, port: number }} Endpoint */
@@ -145,6 +145,8 @@ export function createRelay(options) {
     spawnedAt: 0,
     spawns: 0,
     consecutiveFailures: 0,
+    /** Whether the current child's proxy port has answered at least once (a deliberate restart is then not a failure). */
+    backendSeen: false,
     lastKind: /** @type {keyof typeof MESSAGES | undefined} */ (undefined),
   }
   const sockets = new Set()
@@ -167,11 +169,12 @@ export function createRelay(options) {
     state.spawns += 1
     if (child === undefined) return 'starting'
     state.child = child
+    state.backendSeen = false
     log(`started dsh web (pid ${String(child.pid ?? '?')})`)
     child.once('exit', (code, signal) => {
       const uptime = Date.now() - state.spawnedAt
       state.child = undefined
-      if (uptime < FAST_EXIT_MS) state.consecutiveFailures += 1
+      if (uptime < FAST_EXIT_MS && !state.backendSeen) state.consecutiveFailures += 1
       else state.consecutiveFailures = 0
       log(`dsh web exited (code ${String(code)}, signal ${String(signal)}) after ${String(Math.round(uptime / 1000))}s; failures=${String(state.consecutiveFailures)}`)
     })
@@ -247,6 +250,7 @@ export function createRelay(options) {
         state.lastKind = undefined
       }
       state.consecutiveFailures = 0
+      state.backendSeen = true
       sockets.add(upstream)
       upstream.once('close', () => sockets.delete(upstream))
       upstream.on('error', () => socket.destroy())

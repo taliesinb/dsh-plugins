@@ -85,8 +85,46 @@ export interface DockAppStatus {
   fallbackUrl: string
 }
 
+export interface ServerAction { id: string; label: string; note: string; danger?: boolean }
+export interface ServerProcess {
+  id: string
+  title: string
+  detail: string
+  pid?: number
+  running: boolean
+  uptimeSeconds?: number
+  rssKb?: number
+  actions: ServerAction[]
+}
+export interface ServerClient {
+  key: string
+  login?: string
+  address: string
+  self: boolean
+  proxied: boolean
+  admitted: string
+  agent: string
+  userAgent: string
+  firstSeen: number
+  lastSeen: number
+  requests: number
+  sockets: number
+  lastPath?: string
+  lastSession?: { method: string; sessionId?: string; cwd?: string; workspace?: string; at: number }
+}
+export interface ServerStatus {
+  instance: string
+  tracking: boolean
+  processes: ServerProcess[]
+  clients: ServerClient[]
+  now: number
+  message?: string
+}
+
 export interface RemoteApi {
   status(): Promise<RemoteStatus>
+  serverStatus(): Promise<ServerStatus>
+  serverAct(target: string, action: string): Promise<ServerStatus>
   enable(): Promise<RemoteStatus>
   disable(): Promise<RemoteStatus>
   setUsers(list: string): Promise<RemoteStatus>
@@ -103,7 +141,7 @@ const CHANNEL = '/tailscale-remote'
 const REMOTE_ONLY_MESSAGE = 'The Tailscale remote is controlled from the DSH host only.'
 
 function createApi(rpc: ClientConnectionRpc): RemoteApi {
-  const call = async (endpoint: string, args: Record<string, unknown> = {}): Promise<RemoteStatus> => {
+  const raw = async (endpoint: string, args: Record<string, unknown> = {}): Promise<unknown> => {
     let result
     try {
       result = await rpc.call(CHANNEL, endpoint, { args })
@@ -112,10 +150,13 @@ function createApi(rpc: ClientConnectionRpc): RemoteApi {
       throw new Error(/HTTP 403/.test(text) ? REMOTE_ONLY_MESSAGE : text)
     }
     if (!result.ok) throw new Error(result.error.message)
-    return result.value as RemoteStatus
+    return result.value
   }
+  const call = (endpoint: string, args: Record<string, unknown> = {}) => raw(endpoint, args) as Promise<RemoteStatus>
   return {
     status: () => call('status'),
+    serverStatus: () => raw('server-status') as Promise<ServerStatus>,
+    serverAct: (target, action) => raw('server-act', { target, action }) as Promise<ServerStatus>,
     enable: () => call('enable'),
     disable: () => call('disable'),
     setUsers: list => call('set-users', { allowedUsers: list }),
@@ -132,13 +173,211 @@ export const inject = ['slots', 'connection']
 export function apply(ctx: Context): void {
   const rpc = (ctx as unknown as { connection: { rpc: ClientConnectionRpc } }).connection.rpc
   const api = createApi(rpc)
-  ctx.slots.inject('settings.section', () => ctx.slots.register({
-    name: 'settings.section',
-    id: 'tailscale-remote',
-    order: 40,
-    label: () => 'Tailscale remote',
-    inject: () => ({ api }),
-  }, TailscaleRemoteSection))
+  ctx.slots.inject('settings.section', () => {
+    const disposers = [
+      ctx.slots.register({
+        name: 'settings.section',
+        id: 'tailscale-remote',
+        order: 40,
+        label: () => 'Tailscale remote',
+        inject: () => ({ api }),
+      }, TailscaleRemoteSection),
+      ctx.slots.register({
+        name: 'settings.section',
+        id: 'tailscale-remote-server',
+        order: 41,
+        label: () => 'Server',
+        inject: () => ({ api }),
+      }, ServerSection),
+    ]
+    return () => { for (const dispose of disposers) dispose() }
+  })
+}
+
+// ---- Server pane ---------------------------------------------------------
+
+function ago(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${String(seconds)}s`
+  if (seconds < 3600) return `${String(Math.floor(seconds / 60))}m ${String(seconds % 60)}s`
+  const hours = Math.floor(seconds / 3600)
+  if (hours < 48) return `${String(hours)}h ${String(Math.floor((seconds % 3600) / 60))}m`
+  return `${String(Math.floor(hours / 24))}d ${String(hours % 24)}h`
+}
+
+const table = {
+  wrap: { width: '100%', overflowX: 'auto' } as CSSProperties,
+  table: { width: '100%', borderCollapse: 'collapse', fontSize: 12, lineHeight: '18px' } as CSSProperties,
+  th: { textAlign: 'left', padding: '4px 8px', color: 'var(--dsw-alias-label-tertiary)', fontWeight: 500, borderBottom: '0.5px solid var(--dsw-alias-border-l2)', whiteSpace: 'nowrap' } as CSSProperties,
+  td: { padding: '6px 8px', borderBottom: '0.5px solid var(--dsw-alias-border-l1, var(--dsw-alias-border-l2))', verticalAlign: 'top', color: 'var(--dsw-alias-label-primary)' } as CSSProperties,
+  muted: { color: 'var(--dsw-alias-label-tertiary)' } as CSSProperties,
+  tag: { display: 'inline-block', padding: '0 6px', borderRadius: 6, fontSize: 11, lineHeight: '16px', background: 'var(--dsw-alias-bg-module-platform)', border: '0.5px solid var(--dsw-alias-border-l4)', marginLeft: 6 } as CSSProperties,
+}
+
+export function ServerSection({ api }: SectionProps) {
+  const [status, setStatus] = useState<ServerStatus | undefined>(undefined)
+  const [error, setError] = useState<string | undefined>(undefined)
+  const [message, setMessage] = useState<string | undefined>(undefined)
+  const [busy, setBusy] = useState<string | undefined>(undefined)
+  const alive = useRef(true)
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await api.serverStatus()
+      if (!alive.current) return
+      setStatus(next)
+      setError(undefined)
+    } catch (caught) {
+      if (alive.current) setError(caught instanceof Error ? caught.message : String(caught))
+    }
+  }, [api])
+
+  useEffect(() => {
+    alive.current = true
+    void refresh()
+    const timer = setInterval(() => { void refresh() }, 5000)
+    return () => {
+      alive.current = false
+      clearInterval(timer)
+    }
+  }, [refresh])
+
+  const act = async (process: ServerProcess, action: ServerAction) => {
+    if (action.danger && !window.confirm(`${action.label} ${process.title}?\n\n${action.note}`)) return
+    setBusy(`${process.id}/${action.id}`)
+    setMessage(undefined)
+    try {
+      const next = await api.serverAct(process.id, action.id)
+      if (!alive.current) return
+      setStatus(next)
+      setMessage(next.message)
+      setError(undefined)
+    } catch (caught) {
+      if (alive.current) setError(caught instanceof Error ? caught.message : String(caught))
+    } finally {
+      if (alive.current) setBusy(undefined)
+    }
+  }
+
+  if (status === undefined) {
+    const stale = error !== undefined && /unknown endpoint/.test(error)
+    return (
+      <div style={styles.section}>
+        <div style={styles.group}>
+          <div style={styles.title}>Server</div>
+          <div style={error === undefined || stale ? styles.caption : styles.error}>
+            {stale ? 'The running DSH predates this pane — it appears after the next restart of dsh web.' : error ?? 'Loading…'}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={styles.section}>
+      <div style={styles.group}>
+        <div style={styles.title}>Processes{status.instance ? ` — ${status.instance} instance` : ''}</div>
+        <div style={table.wrap}>
+          <table style={table.table}>
+            <thead>
+              <tr>
+                <th style={table.th}>Process</th>
+                <th style={table.th}>PID</th>
+                <th style={table.th}>Up</th>
+                <th style={table.th}>RSS</th>
+                <th style={table.th}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.processes.map(process => (
+                <tr key={process.id}>
+                  <td style={table.td}>
+                    <span style={styles.dot(process.running ? '#3ba55c' : 'var(--dsw-alias-label-tertiary)')} />
+                    {process.title}
+                    <div style={{ ...table.muted, fontSize: 11 }}>{process.detail}</div>
+                  </td>
+                  <td style={{ ...table.td, ...styles.mono }}>{process.pid ?? '—'}</td>
+                  <td style={table.td}>{process.uptimeSeconds === undefined ? '—' : ago(process.uptimeSeconds * 1000)}</td>
+                  <td style={table.td}>{process.rssKb === undefined ? '—' : `${String(Math.round(process.rssKb / 1024))} MB`}</td>
+                  <td style={{ ...table.td, whiteSpace: 'nowrap' }}>
+                    {process.actions.map(action => (
+                      <Button
+                        key={action.id}
+                        variant="outline"
+                        size="sm"
+                        disabled={busy !== undefined}
+                        title={action.note}
+                        style={{ marginRight: 6 }}
+                        onClick={() => { void act(process, action) }}
+                      >
+                        {busy === `${process.id}/${action.id}` ? 'Working…' : action.label}
+                      </Button>
+                    ))}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {message !== undefined && <div style={styles.caption}>{message}</div>}
+        {error !== undefined && <div style={styles.error}>{error}</div>}
+        <div style={styles.caption}>
+          Hover an action for what it does. Restarting the relay or dsh web takes this page down briefly; with the relay in front it comes back through the “Starting DSH…” screen.
+        </div>
+      </div>
+
+      <div style={styles.group}>
+        <div style={styles.title}>Clients</div>
+        {!status.tracking && <div style={styles.error}>Client tracking unavailable: the web server’s internal http.Server is not reachable in this DSH build.</div>}
+        <div style={table.wrap}>
+          <table style={table.table}>
+            <thead>
+              <tr>
+                <th style={table.th}>Who</th>
+                <th style={table.th}>From</th>
+                <th style={table.th}>App</th>
+                <th style={table.th}>Live</th>
+                <th style={table.th}>Requests</th>
+                <th style={table.th}>Last seen</th>
+                <th style={table.th}>Viewing</th>
+              </tr>
+            </thead>
+            <tbody>
+              {status.clients.length === 0 && (
+                <tr><td style={{ ...table.td, ...table.muted }} colSpan={7}>No clients in the last 2 minutes.</td></tr>
+              )}
+              {status.clients.map(client => (
+                <tr key={client.key}>
+                  <td style={table.td}>
+                    {client.login ?? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>}
+                    {client.self && <span style={table.tag}>this Mac</span>}
+                  </td>
+                  <td style={{ ...table.td, ...styles.mono }}>{client.address}{client.proxied ? '' : ' (direct)'}</td>
+                  <td style={table.td} title={client.userAgent}>{client.agent}</td>
+                  <td style={table.td}>{client.sockets > 0 ? <span style={{ color: '#3ba55c' }}>● {client.sockets}</span> : <span style={table.muted}>—</span>}</td>
+                  <td style={table.td}>{client.requests}</td>
+                  <td style={table.td}>{ago(status.now - client.lastSeen)} ago</td>
+                  <td style={table.td}>
+                    {client.lastSession === undefined
+                      ? <span style={table.muted}>{client.lastPath ?? '—'}</span>
+                      : (
+                          <>
+                            {client.lastSession.workspace ?? client.lastSession.cwd ?? ''}
+                            {client.lastSession.sessionId !== undefined && <div style={{ ...styles.mono, ...table.muted }}>{client.lastSession.sessionId.replace(/^session-/, '').slice(0, 8)} · {client.lastSession.method}</div>}
+                          </>
+                        )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div style={styles.caption}>
+          Everyone who reached this DSH in the last 2 minutes: tailnet clients through the proxy (Tailscale login, tailnet IP) and direct loopback tabs. “Live” counts open GUI WebSockets; “Viewing” is the last session-related call, not a live cursor.
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ---- UI ------------------------------------------------------------------

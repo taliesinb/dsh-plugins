@@ -12,8 +12,11 @@
  *      exchanged for the proxy's own HttpOnly cookie and redirected to `./`;
  *   3. that cookie.
  * Anything else is 401. The DSH control channel of this plugin
- * (`/tailscale-remote/*`) is never forwarded, so the remote page cannot flip
- * the route or read the token.
+ * (`/tailscale-remote/*`) is forwarded only for this node's own requests (the
+ * Dock app, Safari on this Mac), so another device can look at the panel but
+ * not flip the route, read the token or drive the Server pane. Admitted
+ * requests reach DSH with `x-dsh-tailscale-remote-{admitted,login,self}` set
+ * by us (client copies are dropped) for the Server pane's client tracker.
  *
  * Before admission, two same-origin checks that DSH itself would otherwise be
  * unable to make (we rewrite Host/Origin to loopback before forwarding):
@@ -49,6 +52,7 @@ const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'p
 /** Request headers we never forward: forwarding facts (re-derived), browser cookies (replaced), fetch metadata (re-set). */
 const DROPPED_REQUEST_HEADERS = new Set([
   'host', 'cookie', 'origin', 'referer', 'referrer',
+  'x-dsh-tailscale-remote', 'x-dsh-tailscale-remote-admitted', 'x-dsh-tailscale-remote-login', 'x-dsh-tailscale-remote-self',
   'forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-port', 'x-forwarded-proto', 'x-real-ip',
   'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user',
   ...TAILSCALE_IDENTITY_HEADERS,
@@ -341,7 +345,11 @@ export async function startProxy(spec) {
   const onRequest = (req, res) => {
     const path = pathnameOf(req.url)
     const method = req.method ?? 'GET'
-    if (path === spec.controlPrefix || path.startsWith(`${spec.controlPrefix}/`)) {
+    const isControl = path === spec.controlPrefix || path.startsWith(`${spec.controlPrefix}/`)
+    if (isControl && !isSelfRequest(req, selfAddresses())) {
+      // Another device may look at the panel but not flip the route, read the
+      // token or drive the Server pane. This node itself (the Dock app, Safari
+      // on this Mac) is the operator and passes through below.
       drain(req)
       sendText(res, 403, 'the Tailscale remote is controlled from the DSH host only\n')
       return
@@ -377,10 +385,26 @@ export async function startProxy(spec) {
       unauthorizedPage(res, req, 'You are not signed in to this DSH host.')
       return
     }
-    proxyRequest(req, res, path)
+    if (isControl && admitted === undefined) {
+      drain(req)
+      unauthorizedPage(res, req, 'You are not signed in to this DSH host.')
+      return
+    }
+    proxyRequest(req, res, path, admitted)
   }
 
-  const proxyRequest = (req, res, path) => {
+  /**
+   * What DSH-side observers (the Server pane's client tracker) may trust about
+   * the admitted client: how it got in and, for logins, who. Serve's own
+   * identity headers never reach DSH; these are set by us after admission.
+   */
+  const admissionHeaders = (admitted, req) => ({
+    'x-dsh-tailscale-remote-admitted': admitted?.kind ?? 'public',
+    ...(admitted?.kind === 'user' ? { 'x-dsh-tailscale-remote-login': admitted.login } : {}),
+    ...(isSelfRequest(req, selfAddresses()) ? { 'x-dsh-tailscale-remote-self': '1' } : {}),
+  })
+
+  const proxyRequest = (req, res, path, admitted) => {
     const length = Number(req.headers['content-length'] ?? 0)
     if (!Number.isFinite(length) || length < 0 || length > MAX_REQUEST_BYTES) {
       drain(req)
@@ -388,7 +412,10 @@ export async function startProxy(spec) {
       return
     }
     const isIndex = path === '/' || path === '/index.html'
-    const headers = forwardHeaders(req, backendAuthority, cookieForUpstream(), isIndex ? { 'accept-encoding': 'identity' } : {})
+    const headers = forwardHeaders(req, backendAuthority, cookieForUpstream(), {
+      ...(isIndex ? { 'accept-encoding': 'identity' } : {}),
+      ...admissionHeaders(admitted, req),
+    })
     const up = httpRequest({
       hostname: spec.backendHost,
       port: spec.backendPort,
@@ -445,6 +472,7 @@ export async function startProxy(spec) {
     const headers = forwardHeaders(req, backendAuthority, cookieForUpstream(), {
       connection: 'Upgrade',
       upgrade: req.headers.upgrade ?? 'websocket',
+      ...admissionHeaders(admitted, req),
     })
     const up = httpRequest({ hostname: spec.backendHost, port: spec.backendPort, method: 'GET', path: req.url, headers })
     up.on('upgrade', (upRes, upSocket, upHead) => {

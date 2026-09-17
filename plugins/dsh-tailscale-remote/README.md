@@ -130,7 +130,31 @@ the listener but leaves the route (it comes back with the next boot).
 `ctx.connection.requestRejection` (DSH's Host/Origin fence + cookie), JSON envelope `{type:'client-request', rpcId,
 method, payload:{args}}`: `status`, `enable`, `disable`,
 `set-users {allowedUsers: "a, b"}`, `rotate-token`, `install-dock-app`,
-`uninstall-dock-app`, `install-relay`, `uninstall-relay`.
+`uninstall-dock-app`, `install-relay`, `uninstall-relay`, `server-status`,
+`server-act {target, action}`. The proxy forwards the channel for **this
+node's own** admitted requests (Dock app, Safari on the Mac); other devices get
+403 and a read-only panel.
+
+## The "Server" pane (`server.mjs`)
+
+A second settings section right after *Tailscale remote*:
+
+- **Processes** — the relay (LaunchAgent pid; *Restart* = `launchctl kickstart -k`,
+  which takes DSH down with it, *Stop* = `bootout`), **dsh web** (this
+  process; *Restart*/*Quit* = graceful SIGTERM after the reply — the relay
+  starts it again on the next request and the page comes back through the
+  "Starting DSH…" screen), the **Dock app** (*Launch*/*Relaunch*/*Quit* by
+  bundle path) and **afm** when running (*Stop*; the supervisor restarts it on
+  demand). Uptime/RSS from `ps -o etime=,rss=` (macOS has no `etimes`).
+- **Clients** — everyone who reached this DSH in the last 2 minutes, from a
+  tracker on DSH's own `http.Server` (`ctx.webServer.server`, TypeScript-private
+  but plain JS property access; guarded): Tailscale login and tailnet IP for
+  proxied clients (the proxy sets `x-dsh-tailscale-remote-{admitted,login,self}`
+  after admission; client copies are dropped), `local` + socket peer for direct
+  loopback tabs, a short user-agent label (`DSHDock/1.0` → "DSH Dock app"),
+  open `/api/remote.mux` WebSockets (= live GUI tabs), request count, and the
+  last `POST /api/session/*` body's `sessionId`/`cwd` (observed, never
+  consumed) resolved to a workspace via the sessions store.
 
 ## The Dock app (`dock-app/`)
 

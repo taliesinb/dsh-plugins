@@ -210,11 +210,29 @@ describe('gate', () => {
     assert.equal(loopback.status, 200, 'the listener\'s own authority is always allowed')
   })
 
-  it('never forwards the control channel', async () => {
+  it('forwards the control channel only for this node\'s own admitted requests', async () => {
     seen.length = 0
     const res = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer('alice@example.com'), 'content-type': 'application/json' }, body: '{}' })
-    assert.equal(res.status, 403)
+    assert.equal(res.status, 403, 'another device: refused')
     assert.equal(seen.length, 0)
+    const anonymousSelf = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer(), 'x-forwarded-for': SELF_ADDRESS }, body: '{}' })
+    assert.equal(anonymousSelf.status, 401, 'this node but not admitted: 401')
+    assert.equal(seen.length, 0)
+    const self = await fetchProxy('/tailscale-remote/status', { method: 'POST', headers: { ...servePeer('tali@example.com'), 'x-forwarded-for': SELF_ADDRESS, 'x-dsh-tailscale-remote-login': 'forged@evil.example' }, body: '{}' })
+    assert.equal(self.status, 200)
+    assert.equal(seen.length, 1)
+    assert.equal(seen[0].url, '/tailscale-remote/status')
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-login'], 'tali@example.com', 'admitted login, client copy dropped')
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-admitted'], 'user')
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-self'], '1')
+  })
+
+  it('tags forwarded requests with how they were admitted', async () => {
+    seen.length = 0
+    await fetchProxy('/api/x', { headers: { cookie: `dsh-tailscale-remote=${cookieValueFor(token)}` } })
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-admitted'], 'cookie')
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-login'], undefined)
+    assert.equal(seen[0].headers['x-dsh-tailscale-remote-self'], undefined)
   })
 
   it('invalidates cookies when the token rotates', async () => {

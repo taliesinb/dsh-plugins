@@ -185,6 +185,22 @@ a restart of the affected instance: `launchctl kickstart -k gui/$UID/io.github.t
 restarts the preview relay **and** the preview DSH it spawned (verified: the
 `quitBundle is not defined` slip surfaced only after such a restart).
 
+## Server pane (2026-09-17)
+
+Settings → **Server** (order 41, next to Tailscale remote): processes with
+restart/quit/stop and a client table — see the plugin README. Two facts that
+shaped it: (1) the control channel had to be **forwarded for self-node
+requests** (rightmost `x-forwarded-for` ∈ `Self.TailscaleIPs`), otherwise the
+whole panel is read-only from the Dock app, which is now the primary GUI —
+other devices still get 403; (2) DSH's gateway keeps its WebSocket registry
+per connection (no public list), but the `WebServer` service's `http.Server`
+is reachable as `ctx.webServer.server`, so one `request`/`upgrade` listener
+sees every client, direct or proxied. Verified on the preview through the
+tailnet as this node: launch/relaunch the Dock app, restart dsh web from
+inside (503 splash → back in 2 s). The relay no longer counts such a
+deliberate restart as a failed start (only runs whose proxy port never
+answered count toward the give-up limit of five).
+
 ## What failed on the way (keep)
 
 | Attempt / symptom | Cause / fix |
@@ -200,6 +216,8 @@ restarts the preview relay **and** the preview DSH it spawned (verified: the
 | Live GUI hot-swapped a client bundle whose host lacked the new fields | the plugin is installed live, so `pnpm build` in its directory swaps the open GUI; the client now tolerates `dockApp`/`relay` being absent — always keep new client fields optional |
 | First relay probe with `Host: node` and no `x-forwarded-proto` → 421 in the WebSocket test | canonical authorities carry an explicit port; tailscaled always sends `x-forwarded-proto: https`, the test now does too |
 | Live GUI: `resume failed … SessionAlreadyOwnedError` on a New Session right after the preview Dock app was launched | two servers on one `$DSH_HOME` (see "Preview instance"); the preview now has `~/.dsh-preview` |
+| Tracker test: WebSocket "close" never fired after the client destroyed its end | http upgrade sockets are `allowHalfOpen` and a paused socket never sees the FIN; the fixture now reads and ends — the real `ws` server does |
+| `ps -o etimes=` empty on macOS | Linux-only column; parse `etime` (`[[dd-]hh:]mm:ss`) |
 | Preview `install-dock-app` → `quitBundle is not defined` | a scripted block replacement in `dock-app.mjs` deleted a helper defined inside the replaced span; tests did not cover install (it touches ~/Applications). Restored; restart the instance after host edits |
 
 ## Troubleshooting
