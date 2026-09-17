@@ -231,6 +231,13 @@ browser on this Mac at `https://tali-macbook-air.tailbce956.ts.net/dsh-preview/`
 and by the user as **DSH Preview** in the Dock — never by patching the live
 config. Add rows to `cordis.dev.yml`, then
 `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`.
+**Its default model is local and dumb on purpose**: `apple/foundation` (Apple
+Foundation on-device, 4K window) on the `minimal-no-tools` preset — basic text
+replies only, **no tools**; LM Studio models (`minimal` preset, tools) are
+the other local option. There are no cloud providers/keys in the preview home
+and none should be added, so a preview session can smoke-test UI/plugin
+behaviour but cannot run a real agent turn; test tool-using plugins headlessly
+or in a throwaway home with forwarded credentials (PREVIEWING.md).
 Full procedure, the ad-hoc `/tmp`-home alternative, credential forwarding and
 HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
 

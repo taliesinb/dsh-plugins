@@ -68,7 +68,11 @@ to look at.
      jar (303) and call `/api/...` or the plugin control channels.
 4. Tell the user to click **DSH Preview** in the Dock to see the same thing.
 
-Facts: its Settings persist (the page is treated as the operator's machine),
+Facts: the default model (`apple/foundation`, preset `minimal-no-tools`)
+answers plain text only and has **no tools** — a preview chat is for
+exercising UI and plugin surfaces, not for agent work; switch to an LM Studio
+model (`minimal` preset) if a tool call is what you need to see. Its Settings
+persist (the page is treated as the operator's machine),
 so providers/models configured there stay; sessions and workspaces are the
 preview's own, never the live ones — **never point both servers at one home**
 (session write ownership is a cross-process `flock`; a session listed by both
