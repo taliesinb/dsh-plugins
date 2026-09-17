@@ -477,7 +477,7 @@ function describeRelay(relay: RelayStatus, enabled: boolean): { color: string; t
 }
 
 function describeRoute(status: RemoteStatus): { color: string; text: string } {
-  if (status.route === 'active' && status.proxyRunning) return { color: '#3ba55c', text: `Enabled — serving at ${status.url ?? ''}` }
+  if (status.route === 'active' && status.proxyRunning) return { color: '#3ba55c', text: 'Enabled' }
   if (status.route === 'active') return { color: '#e5a50a', text: 'Route is published but the proxy is not running (enable again)' }
   if (status.route === 'conflict') return { color: '#e5a50a', text: `${status.mountPath} on this node already points at ${status.mappedTarget ?? 'another service'}` }
   if (status.route === 'unavailable') {
@@ -502,7 +502,7 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
     if (!alive.current) return
     setStatus(next)
     setError(undefined)
-    if (!usersDirty) setUsers(next.allowedUsers.join(', '))
+    if (!usersDirty) setUsers(next.allowedUsers.length > 0 ? next.allowedUsers.join(', ') : (next.selfLogin ?? ''))
   }, [usersDirty])
 
   const run = useCallback(async (action: () => Promise<RemoteStatus>) => {
@@ -560,6 +560,11 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
           <div style={{ ...styles.title, flex: 1 }}>
             <span style={styles.dot(route.color)} />
             {route.text}
+            <Info lines={[
+              `Publishes this DSH on your tailnet with tailscale serve at ${status.mountPath} (HTTPS, port ${String(status.servePort)}),`,
+              `behind an authenticating proxy${status.proxyUrl === undefined ? '' : ` on ${status.proxyUrl}`}.`,
+              'Only devices on the tailnet can reach it.',
+            ]} />
           </div>
           <Button
             variant={live ? 'outline' : 'primary'}
@@ -570,29 +575,35 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
             {busy ? 'Working…' : live ? 'Disable' : 'Enable'}
           </Button>
         </div>
-        <div style={styles.caption}>
-          Publishes this DSH on your tailnet with <code>tailscale serve</code> at {status.mountPath} (HTTPS, port {status.servePort}),
-          behind an authenticating proxy{status.proxyUrl === undefined ? '' : ` on ${status.proxyUrl}`}. Only devices on the tailnet can reach it.
-        </div>
         {error !== undefined && <div style={styles.error}>{error}</div>}
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>Address</div>
+        <div style={styles.title}>
+          Address
+          <Info lines={['Keep the trailing slash: Tailscale strips the mount before forwarding,', 'so the page needs it to find its assets.']} />
+        </div>
         <div style={styles.row}>
           <span style={styles.url}>{status.url ?? '(Tailscale hostname unknown)'}</span>
           <Button variant="outline" size="sm" disabled={status.url === undefined} onClick={() => { void copy() }}>
             {copied ? 'Copied' : 'Copy'}
           </Button>
         </div>
-        <div style={styles.caption}>Keep the trailing slash: Tailscale strips the mount before forwarding, so the page needs it to find its assets.</div>
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>Allowed Tailscale users</div>
-        <div style={styles.row}>
+        <div style={styles.title}>
+          Allowed Tailscale users
+          <Info lines={[
+            'Comma-separated tailnet logins (as shown by tailscale whois).',
+            'A device whose verified Tailscale login is listed enters without a token;',
+            'anyone else needs the QR code below.',
+            status.selfLogin === undefined ? '' : `Your own login (${status.selfLogin}) is always allowed, listed or not.`,
+          ]} />
+        </div>
+        <div style={{ ...styles.row, flexWrap: 'nowrap' }}>
           <Input
-            style={{ flex: '1 1 260px' }}
+            style={{ flex: '1 1 auto', minWidth: 0 }}
             value={users}
             placeholder="alice@example.com, bob@github"
             spellCheck={false}
@@ -609,27 +620,24 @@ export function TailscaleRemoteSection({ api }: SectionProps) {
             Save
           </Button>
         </div>
-        <div style={styles.caption}>
-          Comma-separated tailnet logins (as shown by <code>tailscale whois</code>). A device whose verified Tailscale login is listed enters without a token;
-          anyone else needs the QR code below. Leave empty to require the QR code for everyone.
-        </div>
       </div>
 
       <div style={styles.group}>
-        <div style={styles.title}>QR code (includes the access token)</div>
+        <div style={styles.title}>
+          QR code
+          <Info lines={[
+            `Scanning it opens ${status.url ?? ''}?token=… and signs the device in for good,`,
+            'whatever its Tailscale user — it includes the standing access token.',
+            'Treat it like a password: whoever scans it can run commands on this machine.',
+            'Rotating the token signs out every device that used the QR code; allowed Tailscale users are unaffected.',
+          ]} />
+        </div>
         <div style={{ ...styles.row, alignItems: 'flex-start' }}>
           {status.qrSvg === undefined
             ? <div style={{ ...styles.qr, display: 'grid', placeItems: 'center', color: '#888', fontSize: 12 }}>unavailable</div>
             : <div style={styles.qr} dangerouslySetInnerHTML={{ __html: status.qrSvg }} />}
-          <div style={{ flex: '1 1 220px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={styles.caption}>
-              Scanning this code opens <span style={{ fontFamily: 'ui-monospace, Menlo, monospace' }}>{status.url}?token=…</span> and signs the device in for good,
-              whatever its Tailscale user. Treat it like a password: whoever scans it can run commands on this machine.
-            </div>
-            <div>
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.rotateToken) }}>Rotate token</Button>
-            </div>
-            <div style={styles.caption}>Rotating signs out every device that used the QR code; allowed Tailscale users are unaffected.</div>
+          <div>
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => { void run(api.rotateToken) }}>Rotate token</Button>
           </div>
         </div>
       </div>
