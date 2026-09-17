@@ -138,8 +138,12 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
    it the row falls back to the directory basename until the session is opened);
    `stopLive` works because the controller now retains `AgentHandle`s and
    `retire()`s them; a session stored under the destination but not on its account
-   is simply attached (repairs an interrupted move). Backups land in
-   `$DSH_HOME/session-move-backups/<id>-<ts>/`. Archive is registry-global and
+   is simply attached (repairs an interrupted move). The retired artifact is the
+   **session-log directory only** — `$DSH_HOME/sessions/<projectKey(oldCwd)>/<id>/`
+   (log + lock file), renamed into `$DSH_HOME/session-move-backups/<id>-<ts>/`; the
+   workspace directory with the user's files is never touched. Successive moves before
+   the Agent runs again replace the pending notice (origin carried forward) instead of
+   stacking one per hop (`2824719acb`). Archive is registry-global and
    survives a move (an archived session stays hidden in the new workspace — correct,
    but surprising when testing). RPC: `session/move` `{ request: { sessionId,
    destination: { workspaceId } | { path, title? }, stopLive?, notify? } }`,
@@ -155,7 +159,19 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
    `menuContributions`. Verified live on the preview. Pre-existing failing test noted:
    `client-runtime/tests/assembly-dependencies` (HMR without Connection) fails on this
    branch before these changes too.
-3. Fork host: `export`/`import` with attachment bundling.
+3. Fork host — **DONE 2026-09-17**, commit `2824719acb`. Export already existed
+   (`GET /api/session.export?sessionId=&includeDescendants=true`, ZIP with
+   `session.v3.jsonl`, `subagents/<id>/…`, `media/`, `files/`). Added
+   `POST /api/session.import?workspaceId=|cwd=[&origin=&keepIds=&notify=]` with the
+   ZIP as body (`session-log-export/src/import.ts`): strict-restore parse, attachments
+   saved (content-addressed → refs stay valid), ids kept when free / re-minted with
+   children re-parented, root gets a `session-import` notice, root attached. It is an
+   HTTP route, not a Typert Remote (binary body); the plugin relay in step 4 streams
+   `export` → `import` through the egress. Verified between two local instances,
+   including the resumed Agent seeing the notice and `pwd` in the new workspace.
+   Known gap: the destination has no projection cache for the imported session, so the
+   sidebar row shows the directory basename until first open (the title lives in the log
+   and resurfaces then); bundling `sessionListMetadata`/title hints is a later nicety.
 4. Plugin: registry consumers on remote rows, remote destinations, relay, DnD.
 
 ## 5. Pointers
