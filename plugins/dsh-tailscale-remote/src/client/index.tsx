@@ -385,7 +385,9 @@ export function ServerSection({ api }: SectionProps) {
             {status.clients.map(client => (
               <tr key={client.key}>
                 <td style={table.td} title={`${client.login ?? client.admitted}${client.self ? ' — this Mac' : ''}\nadmitted by: ${client.admitted}${client.proxied ? ' (through the tailnet proxy)' : ' (direct loopback)'}`}>
-                  {client.login ?? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>}
+                  {client.login === undefined
+                    ? <span style={table.muted}>{client.admitted === 'cookie' ? 'QR token' : client.admitted}</span>
+                    : client.login.replace(/@.*$/, '')}
                   {client.self && <span style={table.tag}>this Mac</span>}
                 </td>
                 <td style={{ ...table.td, ...styles.mono }} title={client.proxied ? 'tailnet address (x-forwarded-for)' : 'direct connection to the loopback port'}>{client.address}</td>
