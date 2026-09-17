@@ -51,3 +51,11 @@ therefore also enforces at `agent/created` for fresh top-level sessions,
 using `ctx.agentDefaultModel.currentSelection()`; an explicit selection later
 re-enforces through the event path. (Found on alpha: Apple Foundation as the
 default left a blank session on `standard`, 8K of tool schemas on the wire.)
+
+## Debugging
+
+`ctx.logger` output is not written anywhere in the web profile, so set
+`ENFORCE_PRESET_TRACE=/path/to/file` in the host's environment to get a
+line per decision (agent/created, default selection, rule, select result).
+This is how the `minimal-no-tools` preset was found broken (`dsh-persona`
+renamed `text` → `prefix`; the mount failure was silent otherwise).

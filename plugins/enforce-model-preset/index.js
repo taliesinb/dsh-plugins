@@ -32,6 +32,8 @@
  *   catch-all rule (or narrow rules) if manual choices should win more often.
  */
 
+import { appendFileSync } from 'node:fs'
+
 export const name = 'enforce-model-preset'
 
 export const inject = ['agents', 'agentPresets', 'sessionProjections', 'agentDefaultModel']
@@ -81,11 +83,13 @@ export function apply(ctx, config) {
     } catch {
       return // projection absent: roster not mounted for this session shape
     }
+    trace(`enforce ${session.id}: current=${String(current)} -> ${rule.preset}`)
     if (current === rule.preset) return
     const agent = knownAgent ?? ctx.agents.get(session.id)
     if (agent === undefined) return // no live agent (e.g. cold log replay)
     try {
       await ctx.agentPresets.select(agent, rule.preset)
+      trace(`selected ${rule.preset} for ${session.id}`)
       ctx.logger.info(
         `enforce-model-preset: session "${session.id}" → preset "${rule.preset}" `
         + `(model ${selection.provider}/${selection.model})`,
@@ -96,6 +100,7 @@ export function apply(ctx, config) {
       const text = String(error)
       if ((error !== null && typeof error === 'object' && error.code === 'agent-preset/locked')
         || text.includes('agent-preset/locked') || text.includes('already started')) return
+      trace(`select failed for ${session.id}: ${text}`)
       ctx.logger.warn(
         `enforce-model-preset: could not switch session "${session.id}" to `
         + `preset "${rule.preset}": ${text}`,
@@ -108,18 +113,32 @@ export function apply(ctx, config) {
   // Foundation by making it the default): no `model/selection` event ever
   // fires. Enforce at agent creation on the effective default; a later
   // explicit selection re-enforces through the event path below.
+  const trace = (line) => { if (process.env.ENFORCE_PRESET_TRACE) { try { appendFileSync(process.env.ENFORCE_PRESET_TRACE, `${new Date().toISOString()} ${line}\n`) } catch {} } }
   ctx.on('agent/created', ({ agent }) => {
     const session = agent.session
+    trace(`agent/created ${session.id} depth=${String(session.header?.delegationDepth)} seq=${String(session.seq)}`)
     if ((session.header?.delegationDepth ?? 0) > 0) return
-    if (session.seq !== 0) return // resumed or seeded: composition is fixed
+    // Blank = no turn has run (the preamble events make a fresh session's seq
+    // non-zero, so seq is not the test); `agentPresets.select` re-checks this
+    // under its queue and refuses with agent-preset/locked otherwise.
+    let boundary
+    try {
+      boundary = ctx.sessionProjections.stateOf(session, 'turnBoundary')
+    } catch {
+      boundary = undefined
+    }
+    if (boundary !== undefined && (boundary.openTurnStartSeq !== null || boundary.lastTurn > 0)) return
     let selection
     try {
       selection = ctx.agentDefaultModel.currentSelection()
-    } catch {
+    } catch (error) {
+      trace(`default selection failed: ${String(error)}`)
       return
     }
+    trace(`default selection ${JSON.stringify(selection)}`)
     if (typeof selection?.provider !== 'string' || typeof selection?.model !== 'string') return
     const rule = match(selection)
+    trace(`rule ${JSON.stringify(rule)}`)
     if (rule === undefined) return
     void enforce(session, selection, rule, agent).catch((error) => {
       ctx.logger.warn(`enforce-model-preset: enforcement at creation failed: ${String(error)}`)
