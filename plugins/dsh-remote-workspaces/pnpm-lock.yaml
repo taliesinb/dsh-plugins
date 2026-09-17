@@ -9,36 +9,36 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/vendor/schemastery
-        version: link:../../../deepseek-harness-embed/vendor/schemastery
+        specifier: link:/Users/tali/github/deepseek-harness/vendor/schemastery
+        version: link:../../../deepseek-harness/vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/vendor/cordis
-        version: link:../../../deepseek-harness-embed/vendor/cordis
+        specifier: link:/Users/tali/github/deepseek-harness/vendor/cordis
+        version: link:../../../deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-api-workspace-controller':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/api/workspace-controller
-        version: link:../../../deepseek-harness-embed/packages/api/workspace-controller
+        specifier: link:/Users/tali/github/deepseek-harness/packages/api/workspace-controller
+        version: link:../../../deepseek-harness/packages/api/workspace-controller
       '@deepseek-ai/dsh-client-connection':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/connection
-        version: link:../../../deepseek-harness-embed/packages/client/connection
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/connection
+        version: link:../../../deepseek-harness/packages/client/connection
       '@deepseek-ai/dsh-client-store':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/store
-        version: link:../../../deepseek-harness-embed/packages/client/store
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/store
+        version: link:../../../deepseek-harness/packages/client/store
       '@deepseek-ai/dsh-client-ui-layout':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-layout
-        version: link:../../../deepseek-harness-embed/packages/client/ui-layout
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-layout
+        version: link:../../../deepseek-harness/packages/client/ui-layout
       '@deepseek-ai/dsh-client-ui-primitives':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-primitives
-        version: link:../../../deepseek-harness-embed/packages/client/ui-primitives
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-primitives
+        version: link:../../../deepseek-harness/packages/client/ui-primitives
       '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-renderer
-        version: link:../../../deepseek-harness-embed/packages/client/ui-renderer
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-renderer
+        version: link:../../../deepseek-harness/packages/client/ui-renderer
       '@deepseek-ai/dsh-client-ui-slots':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-slots
-        version: link:../../../deepseek-harness-embed/packages/client/ui-slots
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-slots
+        version: link:../../../deepseek-harness/packages/client/ui-slots
       '@deepseek-ai/dsh-client-ui-workspace':
-        specifier: link:/Users/tali/github/deepseek-harness-embed/packages/client/ui-workspace
-        version: link:../../../deepseek-harness-embed/packages/client/ui-workspace
+        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-workspace
+        version: link:../../../deepseek-harness/packages/client/ui-workspace
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
