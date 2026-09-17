@@ -231,8 +231,8 @@ GUI. **On Tali's Mac this no longer holds**: with `dsh-tailscale-remote`
 installed, any browser on the machine (incl. the `browser-automation` STP
 windows) is admitted by the node's own Tailscale identity at
 `https://tali-macbook-air.tailbce956.ts.net/dsh/` (live) and `/dsh-preview/`
-(preview server, started on demand by its relay; its `?token=` URL is in
-`~/.dsh/logs/dsh-web-preview.log`) — see `recipes/dock-app-via-tailnet.md`.
+(preview server on its own home `~/.dsh-preview`, started on demand by its
+relay; its `?token=` URL is in `~/.dsh-preview/logs/dsh-web-preview.log`) — see `recipes/dock-app-via-tailnet.md`.
 Elsewhere, the fallback below still applies. Alternative used in `recipes/wolfram-kernel-supervisor.md`: load
 `lib/client.js` in Node under a fake `window.__ModuleLoader__` with stub
 platform modules, capture what `apply(ctx)` registers, and replay a real

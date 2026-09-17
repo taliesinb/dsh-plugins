@@ -199,20 +199,22 @@ Every script takes `--instance preview` to address the preview pair.
 
 ## Two instances side by side
 
-The row is installed in the live profile; `<plugins>/cordis.dev.yml` overrides
-its `config` for the preview server (`instance: preview`, ports 3085/3086,
-`mountPath: /dsh-preview`, `dockAppName: DSH Preview`, red glyph, `relayStart`
-= `pnpm dsh --profile web --patch …/cordis.dev.yml --no-open --port 3088`):
+The live row sits in `~/.dsh/profiles/web/cordis.patch.yml`; the preview
+server runs against **its own home** `~/.dsh-preview`, whose
+`profiles/web/cordis.patch.yml` inserts the same plugin with `instance: preview`,
+ports 3085/3086, `mountPath: /dsh-preview`, `dockAppName: DSH Preview`, a red
+glyph and `relayStart` = `pnpm dsh --profile web --patch …/cordis.dev.yml --no-open --port 3088`
+(the LaunchAgent carries `DSH_HOME=~/.dsh-preview`; `relay:install --dsh-home`):
 
 ```
-DSH.app          → /dsh          → relay :3083 (io.github.taliesinb.dsh-web-relay)         → proxy :3084 → dsh web :3080
-DSH Preview.app  → /dsh-preview  → relay :3085 (io.github.taliesinb.dsh-web-relay.preview) → proxy :3086 → dsh web :3088 (+ dev overlay)
+DSH.app          → /dsh          → relay :3083 (io.github.taliesinb.dsh-web-relay)         → proxy :3084 → dsh web :3080  (~/.dsh)
+DSH Preview.app  → /dsh-preview  → relay :3085 (io.github.taliesinb.dsh-web-relay.preview) → proxy :3086 → dsh web :3088  (~/.dsh-preview + dev overlay)
 ```
 
-Opening either Dock app cold starts *its* DSH. Because both servers run
-against the same `$DSH_HOME`, they share sessions and settings — the preview
-differs only in composition (the overlay) and identity (red icon, title
-`DSH preview :3088`).
+Opening either Dock app cold starts *its* DSH. Separate homes are not
+optional for a long-lived preview: session write ownership is a cross-process
+`flock` on `session.lock`, so two servers over one `$DSH_HOME` fight over any
+session both GUIs list (`SessionAlreadyOwnedError … resume failed`).
 
 ## Develop
 

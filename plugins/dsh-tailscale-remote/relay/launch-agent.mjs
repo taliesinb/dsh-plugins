@@ -70,9 +70,10 @@ function xml(value) {
 }
 
 /**
- * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, instance?: string, executable?: string, path?: string }} spec
+ * @param {{ listen: string, backend: string, dsh: string, cwd: string, start: string, logDir: string, instance?: string, dshHome?: string, executable?: string, path?: string }} spec
  *   `listen`/`backend`/`dsh` are `host:port`; `start` is the shell command that runs DSH in `cwd`;
- *   `instance` ('' = the main one) keeps a preview relay's label, symlink and logs apart.
+ *   `instance` ('' = the main one) keeps a preview relay's label, symlink and logs apart;
+ *   `dshHome` is the DSH_HOME the spawned `dsh web` runs against (default: the installer's).
  * @returns {string[]} ProgramArguments
  */
 export function relayArguments(spec) {
@@ -117,7 +118,7 @@ ${relayArguments(spec).map(arg => `    <string>${xml(arg)}</string>`).join('\n')
   <key>EnvironmentVariables</key>
   <dict>
     <key>DSH_HOME</key>
-    <string>${xml(dshHome())}</string>
+    <string>${xml(spec.dshHome ?? dshHome())}</string>
     <key>PATH</key>
     <string>${xml(spec.path ?? process.env.PATH ?? '/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin')}</string>
   </dict>

@@ -39,6 +39,8 @@
  *   dockAppName  bundle name under ~/Applications                 DSH
  *   dockAppGlyphColor / dockAppTileColor  icon colours            #000000 / #ffffff
  */
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { renderSVG } from 'uqr'
 import { dockAppStatus, installDockApp, uninstallDockApp } from './dock-app.mjs'
@@ -225,6 +227,7 @@ export function apply(ctx, config) {
   const relayLogDir = config.relayLogDir || defaultLogDir()
   const relaySpec = () => ({
     instance,
+    dshHome: process.env.DSH_HOME || join(homedir(), '.dsh'),
     listen: `127.0.0.1:${String(config.publishPort)}`,
     backend: `${config.listenHost}:${String(config.listenPort)}`,
     dsh: `127.0.0.1:${String(ctx.webServer.port)}`,

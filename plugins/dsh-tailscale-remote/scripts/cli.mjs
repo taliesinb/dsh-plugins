@@ -5,6 +5,7 @@
  *
  *   pnpm relay:install [--listen 127.0.0.1:3083] [--backend 127.0.0.1:3084] [--dsh 127.0.0.1:3080]
  *                      [--cwd ~/github/deepseek-harness] [--start "pnpm dsh web --no-open"] [--log-dir ~/.dsh/logs]
+ *                      [--dsh-home ~/.dsh-preview]   (DSH_HOME the relay starts DSH with; default: the caller's)
  *   pnpm relay:uninstall
  *   pnpm relay:status  [--listen 127.0.0.1:3083]
  *   pnpm dock-app:build  [--glyph-color #000000] [--tile-color #ffffff]
@@ -71,6 +72,7 @@ async function main() {
         cwd: expandHome(String(flags.cwd ?? process.cwd())),
         start: String(flags.start ?? 'pnpm dsh web --no-open'),
         logDir: expandHome(String(flags['log-dir'] ?? defaultLogDir())),
+        dshHome: typeof flags['dsh-home'] === 'string' ? expandHome(flags['dsh-home']) : undefined,
         log,
       })
       console.log(result.listening ? 'relay: listening' : 'relay: loaded but not listening yet — check relay.log')

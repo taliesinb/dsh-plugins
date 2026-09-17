@@ -37,6 +37,11 @@ for raw HTML transforms (the manifest does not retitle the browser tab).
 
 Load it **only** in the dev overlay (`cordis.dev.yml`), never the live profile.
 
+> **2026-09-17:** the preview is now a relay-managed server on its own home
+> (`~/.dsh-preview`, port 3088) with a native *DSH Preview.app* — see
+> [`dock-app-via-tailnet.md`](dock-app-via-tailnet.md). The steps below
+> describe the earlier by-hand `:3081` preview against the live home.
+
 ## Install to the Dock
 
 1. Start the preview: `cd ~/github/deepseek-harness && pnpm dsh web --patch

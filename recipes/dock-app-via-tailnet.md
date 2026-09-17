@@ -139,23 +139,32 @@ SIGTERM to the relay stopped its DSH process group.
 and Node symlink (`dsh-web-relay-preview`, also what Login Items shows), log
 files (`relay-preview.log`, `dsh-web-preview.log`), Dock app bundle id
 (`io.github.taliesinb.dsh-dock-app.preview` → its own WebKit data store) and
-the state file (`~/.dsh/tailscale-remote-preview.json`, so `enabled`/token are
-independent). The dev overlay `cordis.dev.yml` carries an **id-targeted config
-override** for `tali-tailscale-remote` (the row lives in the live profile; an
-`insert` of the same id would be a duplicate):
+the state file (`tailscale-remote-preview.json`).
 
-```yaml
-- id: tali-tailscale-remote
-  config: { instance: preview, listenPort: 3086, publishPort: 3085, mountPath: /dsh-preview,
-            dockAppName: DSH Preview, dockAppGlyphColor: '#E5484D',
-            relayCwd: /Users/tali/github/deepseek-harness,
-            relayStart: pnpm dsh --profile web --patch /Users/tali/github/tali-dash-plugins/cordis.dev.yml --no-open --port 3088 }
-```
+**The preview has its own home, `~/.dsh-preview`** — decided after the first
+shared-home attempt bit within minutes: I launched *DSH Preview.app*, its GUI
+created a blank New Session (`session-510b83c6`) in the shared
+`~/.dsh/sessions`, the preview server took the session's write lease (a
+cross-process `flock` on `session.lock`, `session-persistence-jsonl/lease.ts`),
+the live GUI listed the same blank row, Tali typed into it, and the live server
+got `resume failed … SessionAlreadyOwnedError: already owned by an active
+write handle`. The old by-hand `:3081` preview against the live home only ever
+ran briefly; a relay-managed preview is long-lived, so the homes must differ.
+Fix at the time: `launchctl kickstart -k …preview` (process death releases the
+kernel lock); the orphaned blank session can be deleted from the live GUI.
 
-Installed with `pnpm relay:install --instance preview --listen 127.0.0.1:3085 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 --cwd … --start "…"`,
-then a first `curl http://127.0.0.1:3085/` cold-started the preview DSH (3 s);
-its `?token=` URL is in `~/.dsh/logs/dsh-web-preview.log`, which is how an
-agent authenticates to the preview's control channel (`enable`,
+Layout: `~/.dsh-preview/profiles/web/cordis.patch.yml` **inserts** the plugin
+row with the preview config (an id-targeted override in the dev overlay has
+nothing to target in a fresh home); `<plugins>/cordis.dev.yml` stays a pure
+complement (plugins under trial). The LaunchAgent plist carries
+`DSH_HOME=/Users/tali/.dsh-preview` (`pnpm relay:install --instance preview
+--dsh-home ~/.dsh-preview --log-dir ~/.dsh-preview/logs --listen 127.0.0.1:3085
+--backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 --cwd … --start "pnpm dsh --profile
+web --patch …/cordis.dev.yml --no-open --port 3088"`). Providers/settings for
+the preview are configured independently in its GUI (Settings persist thanks
+to `ownsHost`). A first `curl http://127.0.0.1:3085/` cold-started it (3 s);
+its `?token=` URL is in `~/.dsh-preview/logs/dsh-web-preview.log`, which is how
+an agent authenticates to the preview's control channel (`enable`,
 `install-dock-app`) — the preview Dock app was installed through that
 channel, i.e. the same code path as the panel button. Port 3081 (the older
 by-hand preview convention) was avoided because other sessions' ad-hoc servers
@@ -186,6 +195,7 @@ restarts the preview relay **and** the preview DSH it spawned (verified: the
 | Login Items / "App Background Activity" names the agent **zsh** | the item is named after `ProgramArguments[0]`; the agent now runs a symlink `…/Application Support/dsh-tailscale-remote/dsh-web-relay → node` |
 | Live GUI hot-swapped a client bundle whose host lacked the new fields | the plugin is installed live, so `pnpm build` in its directory swaps the open GUI; the client now tolerates `dockApp`/`relay` being absent — always keep new client fields optional |
 | First relay probe with `Host: node` and no `x-forwarded-proto` → 421 in the WebSocket test | canonical authorities carry an explicit port; tailscaled always sends `x-forwarded-proto: https`, the test now does too |
+| Live GUI: `resume failed … SessionAlreadyOwnedError` on a New Session right after the preview Dock app was launched | two servers on one `$DSH_HOME` (see "Preview instance"); the preview now has `~/.dsh-preview` |
 | Preview `install-dock-app` → `quitBundle is not defined` | a scripted block replacement in `dock-app.mjs` deleted a helper defined inside the replaced span; tests did not cover install (it touches ~/Applications). Restored; restart the instance after host edits |
 
 ## Troubleshooting
