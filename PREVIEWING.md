@@ -40,7 +40,8 @@ to look at.
 |---|---|---|
 | `DSH_HOME` | `~/.dsh` | `~/.dsh-preview` |
 | `dsh web` port | 3080 | 3088 |
-| composition | `~/.dsh/profiles/web/cordis.patch.yml` | `~/.dsh-preview/profiles/web/cordis.patch.yml` (only the `tali-tailscale-remote` row) **+ `cordis.dev.yml`** (the plugins under trial) |
+| composition | `~/.dsh/profiles/web/cordis.patch.yml` | `~/.dsh-preview/profiles/web/cordis.patch.yml` (standing rows: `tali-tailscale-remote`, `tali-local-model-supervisor`, `tali-enforce-model-preset`) **+ `cordis.dev.yml`** (the plugins under trial) |
+| models | cloud providers per `~/.dsh/settings.yaml` | **local only, on purpose**: Apple Foundation (`apple/foundation`, default; `afm` on :9997 started on demand, `minimal-no-tools` preset) and LM Studio (:1234, `minimal` preset). No cloud keys — do not add any. |
 | tailnet URL | `https://tali-macbook-air.tailbce956.ts.net/dsh/` | `…/dsh-preview/` |
 | relay → proxy | :3083 → :3084 | :3085 → :3086 |
 | Dock app | `~/Applications/DSH.app` | `~/Applications/DSH Preview.app` (red) |
@@ -50,8 +51,7 @@ to look at.
 
 1. Put the plugin row(s) under trial into `cordis.dev.yml` (absolute `name`
    paths; an `insert` list — it is a *complement* to the preview home's
-   profile patch, which only contains `tali-tailscale-remote`; do not repeat
-   that id).
+   profile patch; do not repeat its standing ids listed above).
 2. Start or restart the preview: `launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview`
    (restarts the relay **and** the DSH it spawned — required after editing
    `cordis.dev.yml` or any host-side plugin module; client-bundle rebuilds

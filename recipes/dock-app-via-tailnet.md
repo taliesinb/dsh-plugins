@@ -160,9 +160,13 @@ complement (plugins under trial). The LaunchAgent plist carries
 `DSH_HOME=/Users/tali/.dsh-preview` (`pnpm relay:install --instance preview
 --dsh-home ~/.dsh-preview --log-dir ~/.dsh-preview/logs --listen 127.0.0.1:3085
 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 --cwd … --start "pnpm dsh --profile
-web --patch …/cordis.dev.yml --no-open --port 3088"`). Providers/settings for
-the preview are configured independently in its GUI (Settings persist thanks
-to `ownsHost`). A first `curl http://127.0.0.1:3085/` cold-started it (3 s);
+web --patch …/cordis.dev.yml --no-open --port 3088"`). The preview is
+**local-only by design**: `~/.dsh-preview/settings.yaml` carries just the
+`apple` (default, `foundation`) and `lmstudio` providers copied from the live
+file, `.agent-presets/minimal-no-tools` is copied, and the profile patch adds
+`tali-local-model-supervisor` (afm :9997, adopts a live-started instance) and
+`tali-enforce-model-preset` (apple → minimal-no-tools, lmstudio → minimal).
+No cloud keys. Further settings persist from its GUI thanks to `ownsHost`. A first `curl http://127.0.0.1:3085/` cold-started it (3 s);
 its `?token=` URL is in `~/.dsh-preview/logs/dsh-web-preview.log`, which is how
 an agent authenticates to the preview's control channel (`enable`,
 `install-dock-app`) — the preview Dock app was installed through that

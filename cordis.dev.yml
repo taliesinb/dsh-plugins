@@ -1,36 +1,23 @@
-# Dev-instance additions, applied ON TOP OF the live web profile.
+# Dev overlay for the STANDING PREVIEW server (see PREVIEWING.md).
 #
-# The preview server runs with `pnpm dsh web --patch <this file> --port 3081`
-# against the LIVE home (~/.dsh), so its composition is: profile bundles +
-# ~/.dsh/profiles/web/cordis.patch.yml + this overlay. A plugin already
-# installed in the live profile must therefore NOT be repeated here — a second
-# row with the same id fails the boot with "duplicate loader entry id", and a
-# renamed id would load the plugin twice (double tools, double servers).
+# The preview runs against its own home, ~/.dsh-preview (never the live
+# ~/.dsh), started on demand by the relay LaunchAgent
+# io.github.taliesinb.dsh-web-relay.preview as
+#   DSH_HOME=~/.dsh-preview pnpm dsh --profile web --patch <this file> --no-open --port 3088
+# Composition = profile bundles + ~/.dsh-preview/profiles/web/cordis.patch.yml
+# + this overlay. That profile patch owns the preview's standing rows —
+# tali-tailscale-remote (relay :3085 → proxy :3086, /dsh-preview, DSH Preview.app),
+# tali-local-model-supervisor (Apple Foundation via afm :9997) and
+# tali-enforce-model-preset (local models → minimal presets) — so do NOT
+# repeat those ids here (duplicate id = boot failure; renamed id = loaded twice).
+# This overlay is the COMPLEMENT: the plugins under trial. After editing it,
+#   launchctl kickstart -k gui/$UID/io.github.taliesinb.dsh-web-relay.preview
+# (host rows are not hot-reloaded; client bundles are).
 #
-# Live profile owns: enforce-model-preset, browser-automation, dash-docsets,
-# local-model-supervisor, notion-mcp, wolfram-kernel-supervisor,
-# foreign-link-opener, settings-shortcut, session-introspect, session-title-slug
-# (2026-09-16),
-# fs-tools (2026-09-16), tailscale-remote (2026-09-16; it also binds 127.0.0.1:3083 and owns the /dsh
-# serve route, so a preview must not load it — or must set another
-# listenPort/mountPath).
-# This overlay only adds what is NOT there: agent-status-indicator and the
-# preview-only red identity.
-#
-# For a fully ISOLATED throwaway-home preview (see PREVIEWING.md) this file is
-# intentionally incomplete — copy the live-profile rows here for that flow.
 # Paths MUST be absolute (a patch contributes config; it does not move the
 # loader's module-resolution root). Machine-specific by design.
 - insert:
-    - id: tali-agent-status-indicator
-      name: '/Users/tali/github/tali-dash-plugins/plugins/agent-status-indicator/index.js'
-    # Preview-only identity: red whale + "DSH-dev" so a Dock-installed preview
-    # instance is never confused with the live server. Dev overlay ONLY.
+    # Preview-only identity: red whale + "DSH-dev" title so the preview is
+    # never confused with the live server.
     - id: tali-preview-identity
       name: '/Users/tali/github/tali-dash-plugins/plugins/preview-identity/index.js'
-
-# The preview server runs against its own home, ~/.dsh-preview, whose
-# profiles/web/cordis.patch.yml carries the dsh-tailscale-remote row for the
-# preview instance (relay :3085 → proxy :3086 → dsh web :3088, /dsh-preview,
-# DSH Preview.app). This overlay stays a complement: the plugins under trial.
-# Recipe: recipes/dock-app-via-tailnet.md
