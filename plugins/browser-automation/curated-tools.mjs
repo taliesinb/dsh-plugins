@@ -9,6 +9,7 @@
  * zero-or-one rule when it is omitted).
  */
 
+import { environmentRemedy } from './environment.mjs'
 import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, join, resolve as resolvePath } from 'node:path'
@@ -50,6 +51,8 @@ const tagged = (id, opened, text) => `${opened ? `Opened ${id}. ` : ''}[${id}]\n
 export function createTools(deps, fallbackAgent) {
   const { sessions, readerPool, admitImage, inlineImages, preflight, limits } = deps
   const tools = []
+  /** Has Chrome served a window in this process? Distinguishes "cannot start" from "page went away". */
+  let chromeEverOpened = false
 
   /** The calling agent: from the execution, else the agent these tools were registered for. */
   const agentOf = (exec) => exec.agent ?? fallbackAgent
@@ -488,7 +491,9 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
 
   async function chrome(exec, windowId) {
     preflight('chrome')
-    return sessions.resolveChrome(agentOf(exec), windowId)
+    const resolved = await sessions.resolveChrome(agentOf(exec), windowId)
+    chromeEverOpened = true
+    return resolved
   }
   /** Forward one page-scoped Chrome tool with pageId injected. */
   async function chromeCall(exec, args, rawName, mapArgs = (rest) => rest) {
@@ -950,7 +955,7 @@ while (true) { const t = document.body ? document.body.innerText : ''; const hit
       try {
         return stripUndefined(await execute(args, exec))
       } catch (error) {
-        throw explainFailure(tool.name, args, error, exec, limits.timeoutMs)
+        throw explainFailure(tool.name, args, error, exec, limits.timeoutMs, { chromeEverOpened })
       }
     }
   }
@@ -1040,9 +1045,19 @@ export function withHint(message) {
  * timeouts explained in terms of the plugin's toolCallTimeoutMs; then a hint. Aborts (the user stopped
  * the turn) pass through untouched so DSH keeps recognising them.
  */
-export function explainFailure(toolName, args, error, exec, timeoutMs) {
+export function explainFailure(toolName, args, error, exec, timeoutMs, context = {}) {
   if (error?.name === 'AbortError' || exec?.signal?.aborted === true) return error
   let message = error instanceof Error ? error.message : String(error)
+  // An environment problem (browser not installed, Safari's Remote Automation
+  // switch off, Chrome unable to launch) is not something the model can fix by
+  // retrying or opening another window: say so, and say what the user must do.
+  const browser = toolName.startsWith('safari_') ? 'safari' : 'chrome'
+  const remedy = environmentRemedy(browser, message, { everOpened: browser === 'chrome' ? context.chromeEverOpened === true : true })
+  if (remedy !== undefined) {
+    const explained = new Error(`${toolName}: ${browser === 'safari' ? 'Safari' : 'Chrome'} automation is unavailable on this machine. ${remedy}\n(underlying error: ${message.slice(0, 300)})`, { cause: error })
+    explained.name = error?.name ?? 'Error'
+    return explained
+  }
   const prefixed = /^([a-z][a-z0-9_]*): /.exec(message)
   if (prefixed !== null && prefixed[1] !== toolName && !prefixed[1].startsWith('safari_') && !prefixed[1].startsWith('chrome_')) {
     message = `${toolName}: server tool ${prefixed[1]} failed: ${message.slice(prefixed[0].length)}`

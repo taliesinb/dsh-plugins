@@ -52,6 +52,7 @@
  *   traceFile: ''             # append JSON lifecycle lines here (debugging; '' = off)
  */
 
+import { CHROME_INSTALL_REMEDY, STP_INSTALL_REMEDY, checkSafariTechnologyPreview, findChrome } from './environment.mjs'
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, existsSync, readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
@@ -174,8 +175,8 @@ export function preflightFor(config) {
   return (browser) => {
     if (browser === 'safari') {
       if (!config.safari.enabled) throw new Error('Safari automation is disabled in this deployment (safari.enabled=false).')
-      if (!existsSync(config.safari.driver)) {
-        throw new Error(`Safari automation is unavailable: no safaridriver at "${config.safari.driver}". Safari tools (including screenshots) require Safari Technology Preview 247+ (https://developer.apple.com/safari/technology-preview/) with Develop ▸ Developer Settings ▸ "Allow Remote Automation"; the stable Safari driver has no --mcp mode, so classic Safari cannot be used instead. Use the chrome_* tools if a browser is still needed.`)
+      if (checkSafariTechnologyPreview(config.safari.driver) === 'missing') {
+        throw new Error(`Safari automation is unavailable: no safaridriver at "${config.safari.driver}" (Safari Technology Preview is not installed). ${STP_INSTALL_REMEDY}`)
       }
       return
     }
@@ -183,6 +184,11 @@ export function preflightFor(config) {
     const server = chromeServer(config)
     if (server.missing !== undefined) {
       throw new Error(`Chrome automation is unavailable: ${server.missing}. Google Chrome must also be installed. Or use the safari_* tools.`)
+    }
+    // The browser itself, not just the MCP server: a missing Chrome otherwise
+    // surfaces as a launch-time "Target closed" that reads like a page error.
+    if (config.chrome.args.every(arg => !arg.startsWith('--executablePath') && !arg.startsWith('--browserUrl') && arg !== '--autoConnect') && findChrome() === undefined) {
+      throw new Error(`Chrome automation is unavailable: Google Chrome is not installed on this machine. ${CHROME_INSTALL_REMEDY}`)
     }
   }
 }

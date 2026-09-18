@@ -69,6 +69,7 @@ import { resolve as resolvePath, sep } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { KernelSessions, evaluate } from './kernels.mjs'
 import { findAgentToolsDirectory, findKernel, kernelLaunch } from './servers.mjs'
+import { WOLFRAM_INSTALL_REMEDY, kernelStartRemedy, registerUnavailableStubs } from './environment.mjs'
 import { createShowCore, createTools, parseShowReport, pngSize, showPresentation, stripReports } from './tools.mjs'
 
 export const name = 'wolfram-kernel-supervisor'
@@ -123,7 +124,11 @@ export function apply(ctx, config) {
 
   const kernel = findKernel(config.kernel)
   if (kernel === undefined) {
-    ctx.logger.warn(`wolfram-kernel-supervisor: no Wolfram kernel binary found${config.kernel ? ` at "${config.kernel}"` : ' (Wolfram.app / Mathematica.app / Wolfram Engine.app)'}; plugin is inert`)
+    // Not inert: register the same tool names as stubs that fail with the
+    // install instruction, so the model can tell the user what would unlock
+    // them instead of concluding the tools do not exist.
+    ctx.logger.warn(`wolfram-kernel-supervisor: no Wolfram kernel binary found${config.kernel ? ` at "${config.kernel}"` : ' (Wolfram.app / Mathematica.app / Wolfram Engine.app)'}; registering unavailable stubs`)
+    registerUnavailableStubs(ctx, config, config.kernel)
     return
   }
   const pacletDirectory = findAgentToolsDirectory(config.pacletDirectory)

@@ -17,6 +17,7 @@
  * autoload) — the supervisor pays that in its bootstrap eval.
  */
 
+import { kernelStartRemedy } from './environment.mjs'
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -222,7 +223,8 @@ export async function connectKernel(options) {
   } catch (error) {
     await transport.close()
     const tail = transport.stderrTail.trim()
-    throw new Error(`Wolfram kernel failed to start: ${error instanceof Error ? error.message : String(error)}${tail ? `\nkernel stderr: ${tail.slice(-800)}` : ''}`)
+    const detail = `${error instanceof Error ? error.message : String(error)}${tail ? `\nkernel stderr: ${tail.slice(-800)}` : ''}`
+    throw new Error(`Wolfram kernel failed to start. ${kernelStartRemedy(detail)}\n(underlying error: ${detail.slice(0, 600)})`)
   }
   const timeout = options.timeoutMs
 
