@@ -130,6 +130,23 @@ for P in "${PLUGINS[@]}"; do
   "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' --exclude 'src' --exclude 'tests' --exclude 'test' \
     "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
 done
+# Plugins with real third-party runtime deps (MCP SDK, chrome-devtools-mcp,
+# native sharp). pnpm's symlinked layout does not survive rsync (transitive
+# deps such as zod live only in .pnpm), so ship the plugin files without
+# node_modules and let the host `npm install` the exact pinned versions from
+# a link:-free package.json (workspace links are re-pointed at the synced
+# checkout below). They need the apps installed on the host: Chrome + Safari
+# Technology Preview (Allow Remote Automation) and Wolfram 15.
+APP_PLUGINS=(browser-automation wolfram-kernel-supervisor)
+log "syncing app-backed plugins (deps installed on the host): ${APP_PLUGINS[*]}"
+for P in "${APP_PLUGINS[@]}"; do
+  "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' --exclude 'src' --exclude 'tests' --exclude 'test' \
+    "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
+  DEPS="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(json.dumps({k:v for k,v in d.get("dependencies",{}).items() if not v.startswith("link:")}))' "$HERE/plugins/$P/package.json")"
+  "${RSYNC[@]}" -a "$HERE/tools/remote/install-plugin-deps.sh" "$TARGET:dsh/install-plugin-deps.sh" >/dev/null
+  "${SSH[@]}" "bash ~/dsh/install-plugin-deps.sh '$P' '$DEPS'" || echo "  $P: dependency install failed"
+done
+
 # fs-tools needs the ripgrep binary package (arm64 build fetched on the host).
 "${SSH[@]}" 'set -e; export PATH=$HOME/.local/node/bin:$PATH; T=$HOME/dsh/deps/ripgrep; if [ ! -x "$T/node_modules/@vscode/ripgrep/bin/rg" ]; then mkdir -p "$T" && cd "$T" && ( [ -f package.json ] || echo "{\"private\":true}" > package.json ) && npm install --no-audit --no-fund @vscode/ripgrep >/dev/null 2>&1 && echo "  fs-tools: @vscode/ripgrep installed"; fi; mkdir -p ~/dsh/plugins/fs-tools/node_modules && rm -rf ~/dsh/plugins/fs-tools/node_modules/@vscode && ln -sfn "$T/node_modules/@vscode" ~/dsh/plugins/fs-tools/node_modules/@vscode' || echo "  fs-tools: ripgrep install failed (search tool will fall back)"
 
@@ -155,12 +172,13 @@ PLUGIN="$HOME/dsh/plugins/dsh-tailscale-remote"
 # shipped plugin gets the @deepseek-ai packages it imports as symlinks.
 CK="$HOME/dsh/checkout"
 link_dep() { mkdir -p "$1/node_modules/@deepseek-ai"; ln -sfn "$2" "$1/node_modules/@deepseek-ai/$3"; }
-for P in dsh-tailscale-remote session-introspect fs-tools foreign-link-opener settings-shortcut local-model-supervisor enforce-model-preset session-title-slug; do
+for P in dsh-tailscale-remote session-introspect fs-tools foreign-link-opener settings-shortcut local-model-supervisor enforce-model-preset session-title-slug browser-automation wolfram-kernel-supervisor; do
   D="$HOME/dsh/plugins/$P"; [ -d "$D" ] || continue
   link_dep "$D" "$CK/vendor/schemastery" schemastery
   link_dep "$D" "$CK/vendor/cordis" cordis
   link_dep "$D" "$CK/packages/core/tools" dsh-tools
   link_dep "$D" "$CK/packages/llm/llm" dsh-llm
+  for C in chat conversation primitives renderer session slots tool; do link_dep "$D" "$CK/packages/client/ui-$C" "dsh-client-ui-$C"; done
 done
 
 # Overlay applied on top of the shipped web profile: just the Tailscale remote.
@@ -209,6 +227,21 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
         when: auto
     - id: tali-settings-shortcut
       name: '$HOME/dsh/plugins/settings-shortcut/index.js'
+    - id: tali-browser-automation
+      name: '$HOME/dsh/plugins/browser-automation/index.js'
+      config:
+        subagents: true
+        idleMinutes: 30
+        chrome:
+          headless: false
+        traceFile: $HOME/dsh/logs/browser-automation-trace.log
+    - id: tali-wolfram-kernel-supervisor
+      name: '$HOME/dsh/plugins/wolfram-kernel-supervisor/index.js'
+      config:
+        subagents: true
+        idleMinutes: 60
+        theme: auto
+        traceFile: $HOME/dsh/logs/wolfram-kernel-supervisor-trace.log
     - id: tali-local-model-supervisor
       name: '$HOME/dsh/plugins/local-model-supervisor/index.js'
       config:

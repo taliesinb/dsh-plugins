@@ -152,3 +152,35 @@ HTTPS in identity mode (no tailnet peer was running DSH).
 | Session row title empty | Remote session has no title yet; `↻` after its first turn |
 | Group says "gone" | The remote deleted that workspace; Remove it locally |
 | WebSocket in frame never connects | Check the exact upgrade route `/remote/<id>/api/remote.mux` exists in `status` (`localBase`) and the remote accepts `Origin` = its own origin |
+
+## Deploying app-backed plugins to a remote (alpha, 2026-09-18)
+
+`tools/deploy-remote.sh` ships `browser-automation` and
+`wolfram-kernel-supervisor` when the apps exist on the host. Facts learned:
+
+- **pnpm's node_modules do not survive rsync** (even `-aL`): transitive deps
+  (`zod`) live only in `.pnpm`. The deploy syncs plugin files without
+  node_modules and runs `tools/remote/install-plugin-deps.sh` on the host,
+  which `npm install`s the pinned third-party deps from a `link:`-free
+  manifest into `~/dsh/deps/<plugin>` and symlinks them in; `@deepseek-ai/*`
+  links are re-pointed at the synced checkout. Same trick for `fs-tools`'
+  `@vscode/ripgrep` (1.18: binary in `@vscode/ripgrep-darwin-arm64`, link
+  the whole `@vscode` scope).
+- **Chrome first launch on a fresh Mac** breaks `chrome-devtools-mcp`
+  ("Target closed"): clear the cask's quarantine attr and launch Chrome
+  once headfully (`open -a "Google Chrome" --args --no-first-run`) before
+  automation.
+- **Safari Technology Preview's "Allow Remote Automation" cannot be set by
+  script**: modern Safari keeps it in a secure per-user store
+  (`DidMigrateWebDriverAllowRemoteAutomation`); `defaults write` is ignored
+  and `safaridriver --enable` needs sudo (password). Toggle it once in the
+  GUI on the host: STP ▸ Develop ▸ Developer Settings ▸ Allow Remote
+  Automation. Until then `safari_*` tools error with WebDriverErrorDomain 6;
+  `chrome_*` work regardless.
+- **Wolfram's first kernel launch took 62 s** on alpha (paclet index +
+  licence handshake) — past `wolfram_eval`'s 60 s `timeConstraint`, so the
+  very first call fails and the retry succeeds; subsequent cold starts are
+  ~1 s. Warm it once after install: `wolframscript -code 1+1`.
+- Loader import failures are only visible as `<row>: failed to import` in
+  the launchd log; `node -e 'import("./index.js")'` in the plugin dir gives
+  the real error.
