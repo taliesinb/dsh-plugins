@@ -20,6 +20,16 @@ than repeated. Target fork branch: `feat/embed-session` (worktree
   (`ctx.uiWorkspace.contributeSessionMenu / contributeWorkspaceMenu`) that rows read
   when building their `Menu`; `dsh-remote-workspaces` rows consume the same registry
   so remote rows get identical items.
+- **Every move goes through the modal — no silent moves (Tali, 2026-09-17).**
+  Even when the session is cold and nothing blocks it, the Move / Rehome dialog is
+  shown first: it is the user's one chance to cancel, and it signals that this is
+  an exotic operation rather than a routine sidebar gesture. Applies to all
+  entry points: menu items, **drag-onto-another-group** (drop opens the Move
+  dialog pre-filled with the destination instead of calling `moveSession`
+  directly), the remote-workspaces plugin's Move / Move-to-remote, and any future
+  model-facing tool (it may build the plan, but execution is confirmed by the
+  user). Cancel is the default-focused button. Status: **not yet true for DnD**
+  — see §5.
 - **Live sessions:** offer *stop-and-move* (dispose the resident agent, move cold,
   resumes in the new workspace on next open). Never move a live session in place.
 - **Cross-host moves keep the source as an archived copy** (tombstone title
@@ -186,6 +196,14 @@ visible on first turn after resume, sandbox root in the runtime-context snapshot
    rehome of a remote workspace (remote-side `moveMany` is one RPC away but has no UI).
 
 ## 5. Follow-ups
+
+- **DnD must confirm, not move.** `dropSession` in
+  `packages/client/ui-workspace/src/client/rows/WorkspaceBrowser.tsx` (~1115) calls
+  `moveSession(...)` straight away and only opens the dialog on refusal. Change it
+  to `openMoveDialog(sessionId, title, destinationId)` unconditionally (the
+  same-workspace early return stays); the dialog already handles the live/blockers
+  case. Update the comment at ~1095 and the plugin's remote-drop path when cross-tree
+  DnD lands, so the invariant "drop = pre-filled dialog" holds everywhere.
 
 - Move blockers (`a3efd60bfa`) cover turn / background jobs / owned subagents. Plugin-held
   agent-scoped resources (Wolfram kernel, browser windows, MCP sessions) are not

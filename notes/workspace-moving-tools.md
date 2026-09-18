@@ -71,6 +71,13 @@ Nothing does "rehome a workspace" (bulk + create destination + notice).
 
 ## 3. Plan: `dsh-workspace-rehome` (host-only plugin, this repo)
 
+> **Superseded** by [`workspace-moving-ui.md`](workspace-moving-ui.md): the move
+> became a first-class fork operation (`session.move` / `moveMany` on
+> `feat/embed-session`) with sidebar dialogs, and **every move — including a
+> cold, unblocked one — is confirmed through a modal** (Tali, 2026-09-17). The
+> "no browser half needed" surface below is kept only as history; the
+> per-session mechanics and notice wording still apply.
+
 **Surface:** model-facing tools via `ctx.tools`: `workspace_rehome` (bulk) and
 `session_move` (one-off). No browser half needed — the agent invoking it is by
 definition a straggler in the old workspace. Sidebar action later if a
