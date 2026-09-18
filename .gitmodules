@@ -1,0 +1,5 @@
+[submodule "deepseek-harness"]
+	path = deepseek-harness
+	url = git@github.com:taliesinb/deepseek-harness.git
+	branch = feat/embed-session
+	ignore = dirty

@@ -38,7 +38,7 @@ done
 TARGET="${TARGET:-${DSH_REMOTE_TARGET:-alpha@192.168.0.42}}"
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"                       # tali-dash-plugins
-CHECKOUT="${DSH_CHECKOUT:-$HOME/github/deepseek-harness}"  # the live checkout (feat/embed-session)
+CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"  # the fork, as the submodule of this repo
 PLUGIN_SRC="$HERE/plugins/dsh-tailscale-remote"
 LABEL="ai.symbolica.dsh-remote"
 NODE_VERSION="$(node --version)"                               # pin the host to the local runtime

@@ -101,10 +101,12 @@ fi
 # ── 4. tooling defaults ─────────────────────────────────────────────────────
 log "4. tooling defaults point at the submodule"
 if [ "$DRY" = 0 ]; then
-  sed -i '' 's#^CHECKOUT="\${DSH_CHECKOUT:-\$HOME/github/deepseek-harness}".*#CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"  # the fork, as the submodule of this repo#' "$HERE/tools/deploy-remote.sh"
-  sed -i '' 's#^CHECKOUT="\${DSH_CHECKOUT:-\$(dirname "\$HERE")/deepseek-harness}"#CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"#' "$HERE/tools/install-plugins.sh"
-  grep -q 'DSH_CHECKOUT:-$HERE/deepseek-harness' "$HERE/tools/deploy-remote.sh" || die "deploy-remote.sh default not rewritten"
-  grep -q 'DSH_CHECKOUT:-$HERE/deepseek-harness' "$HERE/tools/install-plugins.sh" || die "install-plugins.sh default not rewritten"
+  # NB: '|' as the s/// delimiter — the replacement carries a trailing '# comment',
+  # and with '#' as the delimiter sed reads that as the end of the command.
+  sed -i '' 's|^CHECKOUT="\${DSH_CHECKOUT:-\$HOME/github/deepseek-harness}".*|CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"  # the fork, as the submodule of this repo|' "$HERE/tools/deploy-remote.sh"
+  sed -i '' 's|^CHECKOUT="\${DSH_CHECKOUT:-\$(dirname "\$HERE")/deepseek-harness}"|CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"|' "$HERE/tools/install-plugins.sh"
+  grep -qF 'DSH_CHECKOUT:-$HERE/deepseek-harness' "$HERE/tools/deploy-remote.sh" || die "deploy-remote.sh default not rewritten"
+  grep -qF 'DSH_CHECKOUT:-$HERE/deepseek-harness' "$HERE/tools/install-plugins.sh" || die "install-plugins.sh default not rewritten"
   bash -n "$HERE/tools/deploy-remote.sh" && bash -n "$HERE/tools/install-plugins.sh"
 else
   echo "  deploy-remote.sh / install-plugins.sh: CHECKOUT default → \$HERE/deepseek-harness"

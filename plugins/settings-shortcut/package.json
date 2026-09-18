@@ -32,7 +32,7 @@
     "prepare": "node build.mjs"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "link:../../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
     "esbuild": "^0.24.0",
     "typescript": "^5.6.2"
   }

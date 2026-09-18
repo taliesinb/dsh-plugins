@@ -30,7 +30,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 PROFILE=web
-CHECKOUT="${DSH_CHECKOUT:-$(dirname "$HERE")/deepseek-harness}"
+CHECKOUT="${DSH_CHECKOUT:-$HERE/deepseek-harness}"
 ACTION=add
 DRY=0
 while [ $# -gt 0 ]; do

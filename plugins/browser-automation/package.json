@@ -36,8 +36,8 @@
     "docs": "node scripts/gen-tool-docs.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery",
+    "@deepseek-ai/dsh-tools": "link:../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../deepseek-harness/vendor/schemastery",
     "@modelcontextprotocol/sdk": "1.29.0",
     "chrome-devtools-mcp": "1.9.0",
     "sharp": "0.35.3"

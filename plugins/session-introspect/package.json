@@ -31,7 +31,7 @@
     "docs": "node scripts/gen-tool-docs.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery"
+    "@deepseek-ai/dsh-tools": "link:../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../deepseek-harness/vendor/schemastery"
   }
 }

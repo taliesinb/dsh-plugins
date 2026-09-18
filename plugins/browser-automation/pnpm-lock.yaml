@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/dsh-tools':
-        specifier: link:../../../deepseek-harness/packages/core/tools
-        version: link:../../../deepseek-harness/packages/core/tools
+        specifier: link:../../deepseek-harness/packages/core/tools
+        version: link:../../deepseek-harness/packages/core/tools
       '@deepseek-ai/schemastery':
-        specifier: link:../../../deepseek-harness/vendor/schemastery
-        version: link:../../../deepseek-harness/vendor/schemastery
+        specifier: link:../../deepseek-harness/vendor/schemastery
+        version: link:../../deepseek-harness/vendor/schemastery
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.6.5)
