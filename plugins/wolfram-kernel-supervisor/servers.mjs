@@ -24,18 +24,17 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { ReadBuffer, serializeMessage } from '@modelcontextprotocol/sdk/shared/stdio.js'
+import { detectKernel, locateKernel } from './kernel-locator.mjs'
 
-export const KERNEL_CANDIDATES = [
-  '/Applications/Wolfram.app/Contents/MacOS/wolfram',
-  '/Applications/Mathematica.app/Contents/MacOS/wolfram',
-  '/Applications/Wolfram Engine.app/Contents/MacOS/wolfram',
-  '/usr/local/bin/wolfram',
-]
-
-/** The kernel binary: the configured path when non-empty, else the first existing candidate. */
+/**
+ * The binary to spawn: the configured path (any form kernel-locator accepts —
+ * bundle, install dir, WolframKernel or wolfram) when non-empty, else the
+ * platform auto-detection. Kept for scripts; the plugin itself goes through
+ * KernelLocator so the settings value and wolframscript are handled too.
+ */
 export function findKernel(configured) {
-  if (configured) return existsSync(configured) ? configured : undefined
-  return KERNEL_CANDIDATES.find(p => existsSync(p))
+  if (configured) return locateKernel(configured)?.launcher
+  return detectKernel().found?.launcher
 }
 
 /** Highest-versioned Wolfram/AgentTools paclet directory in the user repository (or the configured one). */

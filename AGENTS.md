@@ -394,7 +394,11 @@ can reproduce or maintain it:
   why the paclet fork's Show tool is obsolete, `wolfram_show`'s user-only image
   path (presentationMeta + pinned turn-tail gallery + plugin fetch route, and
   the gallery's skip rules for error-box renders / duplicate attachments), the
-  SIGTERM-immune kernel and its kill ladder, and the client-plugin gotchas.
+  SIGTERM-immune kernel and its kill ladder, the client-plugin gotchas, and the
+  kernel-location setting (Settings ▸ Plugins ▸ "Wolfram kernel" card over a
+  host settings namespace; cross-platform auto-detection that fills the setting
+  in; every tool fails with a configure-me message when nothing is found) with
+  the probe-then-`wolframscript -configure` hand-off and its `15.` regex trap.
 
 ## Doc map (checkout-relative)
 

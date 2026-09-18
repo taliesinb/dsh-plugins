@@ -135,9 +135,10 @@ export class KernelSessions {
     if (this.total() >= this.options.maxGlobal) {
       throw new Error(`${this.total()} Wolfram kernels are open across all chats (limit ${this.options.maxGlobal}). Close some (wolfram_kernel_list global:true shows them) or raise maxKernelsGlobal.`)
     }
+    // spec() may refuse (no kernel configured): ask before reserving an index.
+    const spec = this.options.spec(session, session.nextKernel)
     const kernelIndex = session.nextKernel++
     const id = this.id(session, kernelIndex)
-    const spec = this.options.spec(session, kernelIndex)
     const startedAt = Date.now()
     /** @type {Kernel} */
     const kernel = {

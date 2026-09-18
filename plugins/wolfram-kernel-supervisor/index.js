@@ -42,9 +42,27 @@
  * injects a notice; agent disposal and plugin unload close everything. The
  * kernel ignores SIGTERM, so closing is Quit/EOF → SIGKILL (servers.mjs).
  *
+ * KERNEL LOCATION (kernel-locator.mjs). The kernel is resolved live from three
+ * layers: the user's value in the DSH settings namespace `wolfram-kernel-supervisor`
+ * (field `kernelPath`, edited in Settings ▸ Plugins ▸ Plugin configuration ▸
+ * "Wolfram kernel"; the browser half's card) → the plugin config `kernel` →
+ * auto-detection over the platform's install locations, $WOLFRAMSCRIPT_KERNELPATH,
+ * wolframscript's own configuration and $PATH. A successful detection is written
+ * into the setting so the user can see and correct it; when nothing is found the
+ * setting stays empty and EVERY kernel spawn (all wolfram_* tools, /wolfram*
+ * commands) fails with a message naming the setting. Any form works: the
+ * WolframKernel executable, the `wolfram` launcher, a .app bundle, or an install
+ * directory. Because agents also run `wolframscript` from bash, the plugin
+ * probes it and, only when it cannot find a kernel by itself (or its explicit
+ * WOLFRAMSCRIPT_KERNELPATH points at nothing), runs
+ * `wolframscript -configure WOLFRAMSCRIPT_KERNELPATH=<kernel>`.
+ * GET/POST /api/wolfram/kernel serves the card (status; ?action=detect |
+ * configure-wolframscript | probe-wolframscript).
+ *
  * Config (all optional):
  *
- *   kernel: ''                 # wolfram binary; '' = first of /Applications/Wolfram.app, Mathematica.app, Wolfram Engine.app, /usr/local/bin
+ *   kernel: ''                 # composition-layer kernel location (any form above); the settings value overrides it; '' = auto-detect
+ *   configureWolframscript: true  # repair wolframscript's kernel path when it demonstrably cannot find a kernel
  *   pacletDirectory: ''        # Wolfram/AgentTools paclet dir; '' = highest ~/Library/Wolfram/Paclets/Repository/Wolfram__AgentTools-*
  *   server: WolframLanguage    # MCP_SERVER_NAME profile (WolframLanguage | Wolfram | WolframAlpha)
  *   resolution: 144            # wolfram_show default dpi (144 = @2x)
@@ -68,8 +86,9 @@ import { homedir } from 'node:os'
 import { resolve as resolvePath, sep } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
 import { KernelSessions, evaluate } from './kernels.mjs'
-import { findAgentToolsDirectory, findKernel, kernelLaunch } from './servers.mjs'
-import { WOLFRAM_INSTALL_REMEDY, kernelStartRemedy, registerUnavailableStubs } from './environment.mjs'
+import { findAgentToolsDirectory, kernelLaunch } from './servers.mjs'
+import { KernelLocator } from './kernel-locator.mjs'
+import { WOLFRAM_INSTALL_REMEDY } from './environment.mjs'
 import { createShowCore, createTools, parseShowReport, pngSize, showPresentation, stripReports } from './tools.mjs'
 
 export const name = 'wolfram-kernel-supervisor'
@@ -78,6 +97,7 @@ export const inject = ['agents', 'tools', 'connection', 'commands']
 
 export const Config = Schema.object({
   kernel: Schema.string().default(''),
+  configureWolframscript: Schema.boolean().default(true),
   pacletDirectory: Schema.string().default(''),
   server: Schema.string().default('WolframLanguage'),
   resolution: Schema.number().min(36).max(576).default(144),
@@ -109,6 +129,12 @@ function pluginNotice(text) {
 export const SHOWN_IMAGE_PATH = '/api/wolfram/shown'
 export const MANIPULATE_PATH = '/api/wolfram/manipulate'
 export const OPEN_PATH = '/api/wolfram/open'
+export const KERNEL_PATH = '/api/wolfram/kernel'
+/** Settings namespace (Settings ▸ Plugins card key; mirrored in src/client). */
+export const SETTINGS_NS = 'wolfram-kernel-supervisor'
+export const SettingsSchema = Schema.object({
+  kernelPath: Schema.string().default('').description('Wolfram kernel: the WolframKernel executable, the wolfram launcher, a Wolfram.app / Mathematica.app bundle, or an install directory. Empty = auto-detect (filled in when found).'),
+})
 /** Kernel-side support code, Get[]'d once per kernel at bootstrap (DSHPlugin` context). */
 export const KERNEL_PACKAGE = fileURLToPath(new URL('./kernel/DSHPlugin.wl', import.meta.url))
 
@@ -122,20 +148,72 @@ export function apply(ctx, config) {
     try { appendFileSync(config.traceFile, `${JSON.stringify({ t: new Date().toISOString(), ...record })}\n`) } catch { /* best effort */ }
   }
 
-  const kernel = findKernel(config.kernel)
-  if (kernel === undefined) {
-    // Not inert: register the same tool names as stubs that fail with the
-    // install instruction, so the model can tell the user what would unlock
-    // them instead of concluding the tools do not exist.
-    ctx.logger.warn(`wolfram-kernel-supervisor: no Wolfram kernel binary found${config.kernel ? ` at "${config.kernel}"` : ' (Wolfram.app / Mathematica.app / Wolfram Engine.app)'}; registering unavailable stubs`)
-    registerUnavailableStubs(ctx, config, config.kernel)
-    return
-  }
+  // ---------------------------------------------------------------- kernel location
+
+  /** Owner scope of the settings namespace, while a settings provider is mounted. */
+  let settingsScope
+  const locator = new KernelLocator({
+    configuredPath: () => config.kernel,
+    settingPath: () => {
+      if (settingsScope === undefined) return undefined
+      try { return String(settingsScope.get()?.kernelPath ?? '') } catch { return undefined }
+    },
+    persist: async (kernelPath) => { if (settingsScope !== undefined) await settingsScope.update({ kernelPath }) },
+    manageWolframscript: config.configureWolframscript,
+    cacheDir: resolvePath(config.showDirectory.replace(/^~(?=\/|$)/, homedir())),
+    installRemedy: WOLFRAM_INSTALL_REMEDY,
+    logger: ctx.logger,
+    trace,
+  })
+  // The namespace lives on a sub-fiber so a deployment without a settings
+  // provider still gets the plugin (config + auto-detection, nothing persisted).
+  ctx.inject(['settings'], (ctx) => {
+    settingsScope = ctx.settings.register(SETTINGS_NS, SettingsSchema, {
+      ...(config.kernel !== '' ? { base: { kernelPath: config.kernel } } : {}),
+      applies: 'live',
+    })
+    ctx.effect(() => () => { settingsScope = undefined }, 'wolfram-kernel-supervisor: settings scope')
+    ctx.effect(() => settingsScope.watch(() => locator.refresh('settings-changed')), 'wolfram-kernel-supervisor: settings watch')
+    void locator.refresh('settings-registered')
+  })
+  // No settings provider within a few seconds: resolve from config + detection alone.
+  const fallback = setTimeout(() => { if (settingsScope === undefined) void locator.refresh('no-settings-provider') }, 3000)
+  fallback.unref?.()
+  ctx.effect(() => () => clearTimeout(fallback), 'wolfram-kernel-supervisor: locator fallback')
+
   const pacletDirectory = findAgentToolsDirectory(config.pacletDirectory)
   if (pacletDirectory === undefined) {
     ctx.logger.warn('wolfram-kernel-supervisor: no Wolfram__AgentTools paclet directory found; falling back to the paclet-manager launch (~2 s slower per kernel). Install/update Wolfram/AgentTools in Mathematica 15+.')
   }
-  const launch = kernelLaunch({ kernel, pacletDirectory, server: config.server })
+  /** Launch spec for the currently resolved kernel; throws the configure-me message when there is none. */
+  function launchSpec() {
+    const located = locator.current()
+    if (located === undefined) throw new Error(locator.unconfiguredMessage())
+    return kernelLaunch({ kernel: located.launcher, pacletDirectory, server: config.server })
+  }
+
+  ctx.connection.fetch.register({
+    path: KERNEL_PATH,
+    methods: ['GET', 'POST'],
+    fetch: async (request) => {
+      const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', 'cache-control': 'no-store' } })
+      try {
+        if (request.method === 'POST') {
+          const action = new URL(request.url).searchParams.get('action') ?? ''
+          if (action === 'detect') await locator.detectAndFill()
+          else if (action === 'configure-wolframscript') await locator.checkWolframscript('configure')
+          else if (action === 'probe-wolframscript') await locator.checkWolframscript('probe')
+          else if (action === 'refresh') await locator.refresh('card')
+          else return json({ error: `unknown action "${action}"` }, 400)
+        } else {
+          await locator.refresh('card')
+        }
+        return json(locator.status())
+      } catch (error) {
+        return json({ error: error instanceof Error ? error.message : String(error), ...locator.status() }, 500)
+      }
+    },
+  })
 
   /** Label for one chat: session title when logged, else the short id. */
   function chatLabel(agent) {
@@ -180,7 +258,7 @@ export function apply(ctx, config) {
       const theme = resolveTheme()
       session.theme = theme
       return {
-        ...launch,
+        ...launchSpec(),
         clientName: `DSH ${chatLabel(session.agent)} · wl:${session.index}:${kernelIndex}`,
         cwd: session.agent.session.header?.cwd,
         bootstrap: kernelBootstrap(theme),

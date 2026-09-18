@@ -211,6 +211,72 @@ Kill ladder (`servers.mjs` `KernelTransport.close`): `Quit\n` + `stdin.end()` �
 `agent.inject` notice), and plugin unload all go through it; the live test asserts zero leftover
 `StartMCPServer` processes. Stopping the DSH server also takes its kernels down (verified 5 → 4).
 
+### Kernel location setting + wolframscript hand-off (added 2026-09-18)
+
+Trigger: an agent on another machine reported `wolframscript` (1.14.0, `/usr/local/bin`) exiting 0
+with no output — `-activate` said "An appropriate WolframKernel location could not be determined",
+its conf had only the commented `//WOLFRAMSCRIPT_KERNELPATH=` hint — fixable with
+`wolframscript -configure WOLFRAMSCRIPT_KERNELPATH=/Applications/Wolfram.app/Contents/MacOS/WolframKernel`.
+The plugin itself never used wolframscript (it spawns `…/MacOS/wolfram` directly), but agents do from
+bash, and the plugin had no user-facing way to say where the kernel is: `kernel: ''` in YAML plus a
+four-entry macOS-only candidate list, and *inert* (later: stub tools) when nothing matched.
+
+What exists now (`plugins/wolfram-kernel-supervisor/kernel-locator.mjs`, `index.js`, `src/client/kernel-card.tsx`):
+
+- **Settings namespace** `wolfram-kernel-supervisor`, field `kernelPath`, registered through
+  `ctx.settings.register(ns, SettingsSchema, { base: { kernelPath: config.kernel }, applies: 'live' })`
+  on a `ctx.inject(['settings'], …)` sub-fiber (Cordis has no optional inject; a deployment without
+  a settings provider still gets the plugin, with a 3 s fallback resolve from config + detection).
+  Precedence: setting (user layer) → plugin config `kernel:` → auto-detection. **A successful
+  detection is written into the setting** so the user sees what was found; when nothing is found the
+  setting stays empty and every kernel spawn — all `wolfram_*` tools, `/wolfram*` commands — throws
+  `KernelLocator.unconfiguredMessage()`: what was searched, where the setting is (Settings ▸ Plugins ▸
+  Plugin configuration ▸ "Wolfram kernel"), and `WOLFRAM_INSTALL_REMEDY` from `environment.mjs`.
+  `KernelSessions.open` now calls `spec()` *before* reserving a kernel index so the refusal is clean.
+  The earlier `registerUnavailableStubs` (commit `13b308e`) was removed: the real tools must stay
+  registered because the setting can be filled in live.
+- **Accepted forms** (`locateKernel`): the `WolframKernel` binary, the `wolfram` launcher (or
+  anything whose realpath has a `WolframKernel` sibling — `/usr/local/bin/wolfram`), a `.app`
+  bundle, a Linux/Windows install root (`Executables/WolframKernel`, `WolframKernel.exe`), or the
+  `MacOS`/`Executables` dir. Result `{ kernelPath, launcher, root, version }`: `kernelPath` is what
+  wolframscript wants; `launcher` (the `wolfram` wrapper when present) is what the supervisor spawns.
+  Version from `Contents/Info.plist` `CFBundleShortVersionString` (macOS) or a version-shaped path
+  segment. `WolframScript.app` is correctly rejected (no kernel inside).
+- **Detection order** (`detectKernel`): `$WOLFRAMSCRIPT_KERNELPATH` → wolframscript's conf → platform
+  standard locations (macOS `/Applications` + `~/Applications` bundles named `Wolfram*`/`Mathematica*`,
+  Wolfram.app › Mathematica.app › Wolfram Engine.app › others by version; Linux `/usr/local/Wolfram`,
+  `/opt/Wolfram`, `/opt/wolfram`, `~/Wolfram` → `<Product>/<version>` newest first; Windows
+  `%ProgramFiles%`/`%ProgramW6432%`/`%ProgramFiles(x86)%\Wolfram Research\<Product>\<version>`) →
+  `WolframKernel`/`wolfram`/`math` on `$PATH` (symlinks resolved). `searched` is kept for the message.
+- **wolframscript policy** (`KernelLocator.assessWolframscript`): find it (`$PATH`, else beside the
+  launcher); `wolframscript -configure` (no kernel launch) gives the conf path and contents —
+  `//KEY=` lines are wolframscript's own commented hints and count as unset. Explicit path that
+  exists → leave alone (report whether it matches ours). Explicit but missing file → repair. No
+  explicit path → **probe** `wolframscript -code '$Version'` (launches a kernel, 4–10 s; ok =
+  output starts `\d+\.\d+`; the broken case prints nothing and exits 0), cached in
+  `<showDirectory>/wolframscript-probe.json` keyed on wolframscript path+version+mtime and our kernel
+  → only a failed probe runs `wolframscript -configure WOLFRAMSCRIPT_KERNELPATH=<kernelPath>`. Config
+  `configureWolframscript: false` turns the write off (the card still reports). **Gotcha found while
+  testing:** the first probe used `ToString[$VersionNumber]`, which prints `15.` (trailing dot);
+  the regex rejected it, the probe "failed" and the test run configured wolframscript on this Mac
+  (harmless — same kernel it already used — the conf now has an explicit line). `$Version` fixed it.
+- **Card** (`src/client/kernel-card.tsx`): registered under the in-tree `settings.plugin.item` keyed
+  slot with `key: SETTINGS_NS` from a `ctx.inject(['settingsScope'], …)` sub-fiber; the Plugins tab
+  pairs served namespaces with cards by key, so it appears exactly when the Host serves the namespace.
+  Field writes go through `ctx.settingsScope.bind({ namespace })` → `scope.set/unset('kernelPath')`
+  (revision-fenced mutate; empty draft = clear the override). Status comes from the plugin's own
+  route `GET /api/wolfram/kernel` (document-relative `./api/wolfram/kernel`, same-origin cookie);
+  `POST ?action=detect | configure-wolframscript | probe-wolframscript | refresh` drive the buttons.
+  The card polls every 2 s while wolframscript is `checking`, and re-reads 400 ms after a settings
+  revision change (the Host's `watch` re-resolves on commit). In-tree `PluginCard`/`ValueField` are
+  not importable across plugins (bundle purity), so the chrome is inline styles on the same
+  `--dsw-alias-*` tokens; `Tag`, `Button`, `StateDot`, `IconChevronDownOutline14` come from the
+  platform module `ui-primitives`. Type-only dev links added: `ui-settings`, `ui-settings-plugins`.
+- **Tests**: `pnpm run check` now runs `scripts/headless-kernel-setting.mjs` — `apply()` against a
+  fake Cordis ctx + fake settings provider: registration, detection persisted, GET/POST route, bad
+  setting → error naming the path + the Settings location, `detect` refills, unknown action 400, and
+  the no-settings-provider fallback (config in bundle form).
+
 ## 4. Verification performed
 
 - `pnpm run live:kernels`: ids `wl:0:0, wl:0:1, wl:1:0`; last-started default; `x = 1` in one
@@ -248,6 +314,9 @@ Kill ladder (`servers.mjs` `KernelTransport.close`): `Quit\n` + `stdin.end()` �
 | Editing a live row's **comments** did not reload; editing its `config` reloaded the row but kept the **old host code** | loader diffs row semantics; module-source HMR is disabled | host changes → restart `dsh web`; client bundle rebuilds hot-swap on their own |
 | "3 images in a row" under one answer (laptop/wolfram-demo, turn 3) | the model called `wolfram_show` 4× in one turn — `Gold`/`Silver` aren't colours → pink error boxes → retries, plus one `see: true` re-show of the identical image; the gallery pinned every non-`isError` result | accumulator skips `errorImage` and duplicate `attachmentId` (§3.3); verified by replaying the session log through the built bundle with a fake `__ModuleLoader__` (4 → 1 pinned) |
 | Verifying a client-plugin change against the live GUI from an agent's own browser | `dsh web` auth needs the per-process launch token printed only in its terminal; `reverse-proxy.json`'s `accessToken` is a different mechanism | replay the log through `lib/client.js` in Node (mock `ctx.uiConversation.events.register` to capture the `ConversationNodeDefinition`, drive `match/start/update`), or ask Tali to reload |
+| `wolframscript` exits 0 and prints nothing; `-activate`: "An appropriate WolframKernel location could not be determined" (alpha) | its conf has no explicit `WOLFRAMSCRIPT_KERNELPATH` and its default search failed | the plugin probes and, on failure, runs `wolframscript -configure WOLFRAMSCRIPT_KERNELPATH=<kernel>`; by hand: same command with `/Applications/Wolfram.app/Contents/MacOS/WolframKernel` |
+| Probe "failed" on a machine where wolframscript works, and the plugin configured it anyway | `ToString[$VersionNumber]` prints `15.`; regex wanted digits after the dot | probe with `$Version`, match `^\d+\.\d+` |
+| Kernel setting entered but `wolfram_*` still fails "is not a Wolfram kernel" | the path has no `WolframKernel` under `Contents/MacOS`, `Executables`, or itself (e.g. `WolframScript.app`) | enter the `.app` / install dir / `WolframKernel` path; the card's Kernel row shows the exact complaint |
 | 23 stray kernels (~3.7 GB) on the machine before any plugin existed | Pi bridge / Claude Code / older MCP SDK close with SIGTERM, which the kernel ignores | killed all but Claude Desktop's `disclaimer --pgroup` tree; `wolfram_kernel_list global:true` + `wolfram_kernel_close orphanPid` for the future |
 
 ## 6. Follow-ups (not done)

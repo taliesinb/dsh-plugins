@@ -159,15 +159,41 @@ used unmodified. Package symbols must not be spelled like `System\`` built-ins
 - **Shutdown ladder** (`servers.mjs`): write `Quit`, end stdin → wait 2 s → `SIGKILL` → `SIGKILL` child kernels. The kernel **ignores SIGTERM/SIGINT**; MCP-SDK-style SIGTERM closes are how 23 orphans accumulated on this machine before this plugin existed.
 - Idle timer per session (`idleMinutes`, default 60) closes kernels and injects a notice; `agent/disposed` and plugin unload close everything. Caps: `maxKernelsPerSession` 4, `maxKernelsGlobal` 12.
 
+## Where the kernel is (Settings ▸ Plugins ▸ "Wolfram kernel")
+
+The kernel location is a live **setting** (namespace `wolfram-kernel-supervisor`, field
+`kernelPath`), edited in the web GUI under Settings ▸ Plugins ▸ Plugin configuration ▸
+**Wolfram kernel**. Precedence: that setting → the plugin config `kernel:` → auto-detection.
+When the setting is empty the plugin searches `$WOLFRAMSCRIPT_KERNELPATH`, wolframscript's own
+configuration, the platform's standard install locations (macOS `/Applications` and
+`~/Applications` `Wolfram*.app` / `Mathematica*.app`; Linux `/usr/local/Wolfram`, `/opt/Wolfram`
+`<Product>/<version>`; Windows `%ProgramFiles%\Wolfram Research\<Product>\<version>`) and
+`$PATH`, and **fills the setting in** with what it finds. If nothing is found the setting stays
+empty and every `wolfram_*` tool and `/wolfram*` command fails with a message that says where
+the setting is (and how to install Wolfram). Any form is accepted: the `WolframKernel`
+executable, the `wolfram` launcher, a `.app` bundle, or an installation directory; changes
+apply to kernels started from then on.
+
+The card also shows **wolframscript**'s state, because agents run `wolframscript` from bash and it
+locates the kernel independently. The plugin never rewrites a working configuration: an explicit
+`WOLFRAMSCRIPT_KERNELPATH` that exists is left alone; one that points at a missing file is
+repaired; with no explicit path it probes once (`wolframscript -code '$Version'`, result cached in
+`showDirectory/wolframscript-probe.json`) and only a failed probe runs
+`wolframscript -configure WOLFRAMSCRIPT_KERNELPATH=<kernel>` (`configureWolframscript: false`
+disables the write; the buttons on the card do it on request). Status route:
+`GET /api/wolfram/kernel`; `POST ?action=detect|configure-wolframscript|probe-wolframscript`.
+
 ## Config
 
-See the header of `index.js`. Defaults need nothing: Wolfram.app, highest installed `Wolfram__AgentTools-*` paclet, 144 dpi, `theme: auto`, files under `~/Library/Wolfram/DeepseekHarness`.
+See the header of `index.js`. Defaults need nothing: the kernel is auto-detected (see above),
+highest installed `Wolfram__AgentTools-*` paclet, 144 dpi, `theme: auto`, files under
+`~/Library/Wolfram/DeepseekHarness`.
 
 ## Develop
 
 ```sh
 pnpm install                 # links DSH packages from ~/github/deepseek-harness
-pnpm run check               # syntax + Config smoke
+pnpm run check               # syntax + Config smoke + headless kernel-setting test (fake ctx, fake settings provider)
 pnpm run typecheck && pnpm run build   # browser half → lib/client.js
 pnpm run live:kernels        # real kernels: isolation, default rules, 2x Rasterize, ZERO leaked processes
 ```
