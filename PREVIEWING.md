@@ -47,6 +47,83 @@ to look at.
 | Dock app | `~/Applications/DSH.app` | `~/Applications/DSH Preview.app` (red) |
 | logs | `~/.dsh/logs/{relay,dsh-web}.log` | `~/.dsh-preview/logs/{relay,dsh-web}-preview.log` |
 
+**Is it installed?** `launchctl print gui/$UID/io.github.taliesinb.dsh-web-relay.preview >/dev/null 2>&1 && echo yes || echo no`
+(or `cd plugins/dsh-tailscale-remote && pnpm relay:status --instance preview`).
+If not, set it up — everything below is idempotent and touches only the
+preview home, the preview LaunchAgent and the preview Dock app, never `~/.dsh`:
+
+```sh
+R=~/github/tali-dash-plugins                       # this repo; the fork is its submodule deepseek-harness/
+H=~/.dsh-preview
+
+# 1. Preview home: the standing rows (the plugins under trial go in cordis.dev.yml, not here).
+mkdir -p $H/profiles/web $H/.agent-presets
+[ -f $H/profiles/web/cordis.patch.yml ] || cat > $H/profiles/web/cordis.patch.yml <<YML
+- insert:
+    - id: tali-tailscale-remote
+      name: '$R/plugins/dsh-tailscale-remote/index.js'
+      config:
+        instance: preview
+        listenPort: 3086
+        publishPort: 3085
+        mountPath: /dsh-preview
+        dockAppName: DSH Preview
+        dockAppGlyphColor: '#E5484D'
+        relayCwd: $R/deepseek-harness
+        relayStart: pnpm dsh --profile web --patch $R/cordis.dev.yml --no-open --port 3088
+    - id: tali-local-model-supervisor
+      name: '$R/plugins/local-model-supervisor/index.js'
+      config:
+        servers:
+          - id: afm
+            providers: [apple]
+            command: afm
+            args: ['--port', '9997']
+            healthUrl: http://127.0.0.1:9997/v1/models
+            idleMinutes: 15
+    - id: tali-enforce-model-preset
+      name: '$R/plugins/enforce-model-preset/index.js'
+      config:
+        rules:
+          - provider: apple
+            preset: minimal-no-tools
+          - provider: lmstudio
+            preset: minimal
+          - provider: '*'
+            preset: standard
+YML
+# Local-only models: copy just the apple + lmstudio providers from ~/.dsh/settings.yaml into
+# $H/settings.yaml (no cloud keys), set agent-default-model to apple/foundation, and copy
+# the preset: cp -R ~/.dsh/.agent-presets/minimal-no-tools $H/.agent-presets/
+
+# 2. The relay LaunchAgent (:3085 → proxy :3086 → dsh web :3088 under DSH_HOME=$H):
+cd $R/plugins/dsh-tailscale-remote
+pnpm relay:install --instance preview --dsh-home $H --log-dir $H/logs \
+  --listen 127.0.0.1:3085 --backend 127.0.0.1:3086 --dsh 127.0.0.1:3088 \
+  --cwd $R/deepseek-harness \
+  --start "pnpm dsh --profile web --patch $R/cordis.dev.yml --no-open --port 3088"
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3085/     # 503 splash → DSH cold-starts (~3 s) → 401
+
+# 3. Publish the route and build the Dock app. Either via the preview GUI (Settings →
+#    Tailscale remote → Enable, then This Mac → Install Dock app), or headless through the
+#    control channel with the preview's launch token:
+U=$(grep -o 'http://127.0.0.1:3088/?token=[^ ]*' $H/logs/dsh-web-preview.log | tail -1); rm -f /tmp/pj.txt
+curl -s -c /tmp/pj.txt -o /dev/null "$U"
+ctl() { curl -s -b /tmp/pj.txt -H 'content-type: application/json' -H 'origin: http://127.0.0.1:3088' \
+  --data "{\"type\":\"client-request\",\"rpcId\":\"x\",\"method\":\"$1\",\"payload\":{\"args\":{}}}" "http://127.0.0.1:3088/tailscale-remote/$1"; echo; }
+ctl enable; ctl install-dock-app                  # → ~/Applications/DSH Preview.app (red), Dock tile
+pnpm relay:status --instance preview; pnpm dock-app:status --instance preview
+```
+
+Why each knob: `instance: preview` suffixes the LaunchAgent label, logs, state
+file (`tailscale-remote-preview.json`) and Dock bundle id so the pair coexists
+with the live one; the separate home is mandatory (session write locks —
+see below); ports 3085–3088 avoid the live 3080/3083/3084 and the ad-hoc
+3081/3082. Facts and failure table: `recipes/dock-app-via-tailnet.md`
+§"Preview instance". Uninstall: `pnpm relay:uninstall --instance preview &&
+pnpm dock-app:uninstall --instance preview --name "DSH Preview"`, then
+`tailscale serve --https=443 --set-path /dsh-preview off`.
+
 **How to use it as an agent:**
 
 1. Put the plugin row(s) under trial into `cordis.dev.yml` (absolute `name`
