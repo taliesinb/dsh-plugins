@@ -33,10 +33,12 @@ checkout** before relying on this file — it is a summary, the checkout is the
 truth. Recipes spell out the concrete `~`-relative paths of the machine they
 were written on; map them onto the symbols above when you are elsewhere.
 
-Absolute paths are unavoidable in two places and are tolerated there:
-`cordis.dev.yml` rows (`name:` must be an absolute module path) and the
-`link:` devDependencies each plugin uses for type-checking — regenerate both if
-the checkout or this repo moves. The repo is **not** local-only: it is pushed
+Absolute paths are unavoidable in one place and are tolerated there:
+`cordis.dev.yml` rows (`name:` must be an absolute module path; the loader's
+`!!js` interpolation covers `config` only) — regenerate it if the checkout or
+this repo moves. The plugins' `link:` dependencies are **relative**
+(`link:../../../deepseek-harness/...`), so the two repos must be siblings under
+one parent directory. The repo is **not** local-only: it is pushed
 to `origin` (https://github.com/taliesinb/dsh-plugins), so commit finished
 work and `git push`; anything machine-specific (those absolute paths, `~`
 paths in recipes) is documented as such rather than assumed.
@@ -261,8 +263,11 @@ through it.
 
 Each plugin declares `link:` devDependencies pointing into the checkout
 (`vendor/cordis`, `packages/client/ui-slots`, ...) so `pnpm typecheck` sees
-the real d.ts files. Links are absolute paths — regenerate if the checkout
-moves. esbuild does not type-check; the build works even if types drift.
+the real d.ts files. Links are relative (`link:../../../deepseek-harness/...`),
+so keep the checkout next to this repo. `@modelcontextprotocol/sdk` and `sharp`
+are ordinary npm dependencies pinned to the checkout's versions, not links into
+its `.pnpm` store (since `5785d17`). esbuild does not type-check; the build
+works even if types drift.
 
 ## Recipes (`recipes/`)
 

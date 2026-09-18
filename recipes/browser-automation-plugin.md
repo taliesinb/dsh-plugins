@@ -73,9 +73,10 @@ isolated instance per chat; "windows" are its pages, routed by `pageId`.
 ## Install / wire-up (what exists now)
 
 1. Plugin code: `~/github/tali-dash-plugins/plugins/browser-automation`
-   (`pnpm install` there; dependencies are `link:` paths into the DSH checkout's
-   `node_modules/.pnpm` for `@modelcontextprotocol/sdk` and `sharp`, so a DSH
-   upgrade that changes those versions breaks the links — re-point them).
+   (`pnpm install` there; `@modelcontextprotocol/sdk` and `sharp` are ordinary
+   npm dependencies pinned to the DSH checkout's versions since `5785d17` —
+   they were `link:` paths into the checkout's `node_modules/.pnpm` before,
+   which broke on every DSH dependency bump. Bump the pins when DSH bumps).
 2. Live web profile row in `~/.dsh/profiles/web/cordis.patch.yml`:
 
    ```yaml
