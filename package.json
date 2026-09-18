@@ -1,8 +1,10 @@
 {
   "name": "tali-dash-plugins",
   "private": true,
-  "description": "Tali's DSH plugins, recipes and deployment tooling. Scripts: deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
+  "description": "Tali's DSH plugins, recipes and deployment tooling. Scripts: install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
   "scripts": {
+    "install-plugins": "tools/install-plugins.sh",
+    "remove-plugins": "tools/install-plugins.sh --remove",
     "deploy-remote": "tools/deploy-remote.sh",
     "remote-logs": "tools/remote-ctl.sh logs",
     "remote-status": "tools/remote-ctl.sh status",

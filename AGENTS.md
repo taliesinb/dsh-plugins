@@ -120,6 +120,15 @@ generated API in `docs/cordis-api/`):
    `dsh plugin --profile <name> add ./plugins/<dir>` (pnpm-links the local
    directory; `remove` undoes it). Layer order, git installs, and the pnpm
    `allowBuilds` catch: `docs/user/develop/basic/publish.md`.
+   **All twelve live plugins at once:** `pnpm install-plugins [--profile web]`
+   (`tools/install-plugins.sh`; `pnpm remove-plugins` undoes it). Rows then
+   resolve by package name from the profile's hoisted `node_modules`, so no
+   patch carries an absolute path. A "superplugin" package that merely lists
+   the plugins as dependencies does **not** work: pnpm never installs a
+   `link:`ed package's dependencies into the profile, and the loader resolves
+   rows from the profile directory (measured 2026-09-18). Never combine the
+   bundle install with absolute-path `insert` rows for the same plugins —
+   duplicate ids fail the boot.
 
 ## Host plugins (Node side)
 
