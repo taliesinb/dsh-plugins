@@ -9,25 +9,25 @@ importers:
   .:
     devDependencies:
       '@deepseek-ai/cordis':
-        specifier: link:/Users/tali/github/deepseek-harness/vendor/cordis
+        specifier: link:../../../deepseek-harness/vendor/cordis
         version: link:../../../deepseek-harness/vendor/cordis
       '@deepseek-ai/dsh-api-session-controller':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/api/session-controller
+        specifier: link:../../../deepseek-harness/packages/api/session-controller
         version: link:../../../deepseek-harness/packages/api/session-controller
       '@deepseek-ai/dsh-api-workspace-controller':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/api/workspace-controller
+        specifier: link:../../../deepseek-harness/packages/api/workspace-controller
         version: link:../../../deepseek-harness/packages/api/workspace-controller
       '@deepseek-ai/dsh-client-ui-conversation':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-conversation
+        specifier: link:../../../deepseek-harness/packages/client/ui-conversation
         version: link:../../../deepseek-harness/packages/client/ui-conversation
       '@deepseek-ai/dsh-client-ui-renderer':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-renderer
+        specifier: link:../../../deepseek-harness/packages/client/ui-renderer
         version: link:../../../deepseek-harness/packages/client/ui-renderer
       '@deepseek-ai/dsh-client-ui-session':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-session
+        specifier: link:../../../deepseek-harness/packages/client/ui-session
         version: link:../../../deepseek-harness/packages/client/ui-session
       '@deepseek-ai/dsh-client-ui-slots':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/client/ui-slots
+        specifier: link:../../../deepseek-harness/packages/client/ui-slots
         version: link:../../../deepseek-harness/packages/client/ui-slots
       '@types/react':
         specifier: ~18.3.1

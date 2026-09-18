@@ -36,10 +36,10 @@
     "docs": "node scripts/gen-tool-docs.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:/Users/tali/github/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",
-    "@modelcontextprotocol/sdk": "link:/Users/tali/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk",
+    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "chrome-devtools-mcp": "1.9.0",
-    "sharp": "link:/Users/tali/github/deepseek-harness/node_modules/.pnpm/sharp@0.35.3_@types+node@22.20.0/node_modules/sharp"
+    "sharp": "0.35.3"
   }
 }

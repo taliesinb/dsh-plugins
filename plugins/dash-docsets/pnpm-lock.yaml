@@ -9,10 +9,10 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/dsh-tools':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/core/tools
+        specifier: link:../../../deepseek-harness/packages/core/tools
         version: link:../../../deepseek-harness/packages/core/tools
       '@deepseek-ai/schemastery':
-        specifier: link:/Users/tali/github/deepseek-harness/vendor/schemastery
+        specifier: link:../../../deepseek-harness/vendor/schemastery
         version: link:../../../deepseek-harness/vendor/schemastery
       linkedom:
         specifier: ^0.18.12

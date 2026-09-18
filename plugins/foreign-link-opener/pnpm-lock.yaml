@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/schemastery':
-        specifier: link:/Users/tali/github/deepseek-harness/vendor/schemastery
+        specifier: link:../../../deepseek-harness/vendor/schemastery
         version: link:../../../deepseek-harness/vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
-        specifier: link:/Users/tali/github/deepseek-harness/vendor/cordis
+        specifier: link:../../../deepseek-harness/vendor/cordis
         version: link:../../../deepseek-harness/vendor/cordis
       esbuild:
         specifier: ^0.24.0

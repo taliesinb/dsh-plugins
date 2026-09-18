@@ -27,9 +27,9 @@
     "check": "node --check index.js && node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:/Users/tali/github/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",
-    "@vscode/ripgrep": "link:/Users/tali/github/deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep",
-    "@deepseek-ai/dsh-llm": "link:/Users/tali/github/deepseek-harness/packages/llm/llm"
+    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery",
+    "@vscode/ripgrep": "link:../../../deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep",
+    "@deepseek-ai/dsh-llm": "link:../../../deepseek-harness/packages/llm/llm"
   }
 }

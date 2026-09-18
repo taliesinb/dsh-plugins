@@ -37,19 +37,19 @@
     "prepare": "node build.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:/Users/tali/github/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",
-    "@modelcontextprotocol/sdk": "link:/Users/tali/github/deepseek-harness/node_modules/.pnpm/@modelcontextprotocol+sdk@1.29.0_zod@4.4.3/node_modules/@modelcontextprotocol/sdk"
+    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery",
+    "@modelcontextprotocol/sdk": "1.29.0"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "link:/Users/tali/github/deepseek-harness/vendor/cordis",
-    "@deepseek-ai/dsh-client-ui-chat": "link:/Users/tali/github/deepseek-harness/packages/client/ui-chat",
-    "@deepseek-ai/dsh-client-ui-conversation": "link:/Users/tali/github/deepseek-harness/packages/client/ui-conversation",
-    "@deepseek-ai/dsh-client-ui-primitives": "link:/Users/tali/github/deepseek-harness/packages/client/ui-primitives",
-    "@deepseek-ai/dsh-client-ui-renderer": "link:/Users/tali/github/deepseek-harness/packages/client/ui-renderer",
-    "@deepseek-ai/dsh-client-ui-session": "link:/Users/tali/github/deepseek-harness/packages/client/ui-session",
-    "@deepseek-ai/dsh-client-ui-slots": "link:/Users/tali/github/deepseek-harness/packages/client/ui-slots",
-    "@deepseek-ai/dsh-client-ui-tool": "link:/Users/tali/github/deepseek-harness/packages/client/ui-tool",
+    "@deepseek-ai/cordis": "link:../../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-client-ui-chat": "link:../../../deepseek-harness/packages/client/ui-chat",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:../../../deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-session": "link:../../../deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../../deepseek-harness/packages/client/ui-slots",
+    "@deepseek-ai/dsh-client-ui-tool": "link:../../../deepseek-harness/packages/client/ui-tool",
     "@types/react": "~18.3.1",
     "esbuild": "^0.24.0",
     "typescript": "^5.6.2"

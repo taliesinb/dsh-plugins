@@ -9,14 +9,14 @@ importers:
   .:
     dependencies:
       '@deepseek-ai/dsh-llm':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/llm/llm
+        specifier: link:../../../deepseek-harness/packages/llm/llm
         version: link:../../../deepseek-harness/packages/llm/llm
       '@deepseek-ai/dsh-tools':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/core/tools
+        specifier: link:../../../deepseek-harness/packages/core/tools
         version: link:../../../deepseek-harness/packages/core/tools
       '@deepseek-ai/schemastery':
-        specifier: link:/Users/tali/github/deepseek-harness/vendor/schemastery
+        specifier: link:../../../deepseek-harness/vendor/schemastery
         version: link:../../../deepseek-harness/vendor/schemastery
       '@vscode/ripgrep':
-        specifier: link:/Users/tali/github/deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep
+        specifier: link:../../../deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep
         version: link:../../../deepseek-harness/packages/fs/tool-fs-search/node_modules/@vscode/ripgrep

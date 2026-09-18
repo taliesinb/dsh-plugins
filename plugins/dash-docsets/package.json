@@ -28,8 +28,8 @@
     "docs": "node scripts/gen-tool-docs.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-tools": "link:/Users/tali/github/deepseek-harness/packages/core/tools",
-    "@deepseek-ai/schemastery": "link:/Users/tali/github/deepseek-harness/vendor/schemastery",
+    "@deepseek-ai/dsh-tools": "link:../../../deepseek-harness/packages/core/tools",
+    "@deepseek-ai/schemastery": "link:../../../deepseek-harness/vendor/schemastery",
     "linkedom": "^0.18.12",
     "mathml-to-latex": "^1.5.0",
     "turndown": "^7.2.4",
