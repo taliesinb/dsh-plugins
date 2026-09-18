@@ -118,12 +118,21 @@ log "syncing dsh-tailscale-remote (runtime files; deps resolved against the sync
 # of the `apple` provider (afm must be installed on the host: `brew install
 # scouzi1966/afm/afm`), enforce-model-preset switches blank sessions on that
 # provider to the tool-less preset so a 4K on-device model gets a usable window.
-log "syncing local-model-supervisor, enforce-model-preset, session-title-slug, minimal-no-tools preset"
-# session-title-slug is a browser-only plugin: the remote's own shell must run
-# it for `slug: prompt` naming to work inside the framed remote page.
-for P in local-model-supervisor enforce-model-preset session-title-slug; do
-  "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
+# Generic plugins (no machine-specific software): local-model bits, the slug
+# titler, the transcript tools (session-introspect), batch fs tools, and two
+# client conveniences. Excluded on purpose — dash-docsets (Dash.app),
+# browser-automation (Chrome/STP + sharp), wolfram-kernel-supervisor
+# (Mathematica), notion-mcp (Tali's OAuth): install that software on the
+# host first, then add the row here.
+PLUGINS=(local-model-supervisor enforce-model-preset session-title-slug session-introspect fs-tools foreign-link-opener settings-shortcut)
+log "syncing plugins: ${PLUGINS[*]}; minimal-no-tools preset"
+for P in "${PLUGINS[@]}"; do
+  "${RSYNC[@]}" -a --delete --stats --exclude 'node_modules' --exclude 'src' --exclude 'tests' --exclude 'test' \
+    "$HERE/plugins/$P/" "$TARGET:dsh/plugins/$P/" | grep -E 'files transferred' | sed "s/^/  $P: /"
 done
+# fs-tools needs the ripgrep binary package (arm64 build fetched on the host).
+"${SSH[@]}" 'set -e; export PATH=$HOME/.local/node/bin:$PATH; T=$HOME/dsh/deps/ripgrep; if [ ! -x "$T/node_modules/@vscode/ripgrep/bin/rg" ]; then mkdir -p "$T" && cd "$T" && ( [ -f package.json ] || echo "{\"private\":true}" > package.json ) && npm install --no-audit --no-fund @vscode/ripgrep >/dev/null 2>&1 && echo "  fs-tools: @vscode/ripgrep installed"; fi; mkdir -p ~/dsh/plugins/fs-tools/node_modules && rm -rf ~/dsh/plugins/fs-tools/node_modules/@vscode && ln -sfn "$T/node_modules/@vscode" ~/dsh/plugins/fs-tools/node_modules/@vscode' || echo "  fs-tools: ripgrep install failed (search tool will fall back)"
+
 "${SSH[@]}" 'mkdir -p ~/.dsh/.agent-presets'
 "${RSYNC[@]}" -a --delete --stats "$HOME/.dsh/.agent-presets/minimal-no-tools/" "$TARGET:.dsh/.agent-presets/minimal-no-tools/" | grep -E 'files transferred' | sed 's/^/  preset: /'
 
@@ -142,9 +151,17 @@ LABEL="$1"; PORT="$2"; USERS="$3"; UID_="$4"
 NODE="$HOME/.local/node/bin/node"
 PLUGIN="$HOME/dsh/plugins/dsh-tailscale-remote"
 
-# The plugin's only workspace-linked dependency resolves against the synced checkout.
-mkdir -p "$PLUGIN/node_modules/@deepseek-ai"
-ln -sfn "$HOME/dsh/checkout/vendor/schemastery" "$PLUGIN/node_modules/@deepseek-ai/schemastery"
+# Workspace-linked dependencies resolve against the synced checkout: every
+# shipped plugin gets the @deepseek-ai packages it imports as symlinks.
+CK="$HOME/dsh/checkout"
+link_dep() { mkdir -p "$1/node_modules/@deepseek-ai"; ln -sfn "$2" "$1/node_modules/@deepseek-ai/$3"; }
+for P in dsh-tailscale-remote session-introspect fs-tools foreign-link-opener settings-shortcut local-model-supervisor enforce-model-preset session-title-slug; do
+  D="$HOME/dsh/plugins/$P"; [ -d "$D" ] || continue
+  link_dep "$D" "$CK/vendor/schemastery" schemastery
+  link_dep "$D" "$CK/vendor/cordis" cordis
+  link_dep "$D" "$CK/packages/core/tools" dsh-tools
+  link_dep "$D" "$CK/packages/llm/llm" dsh-llm
+done
 
 # Overlay applied on top of the shipped web profile: just the Tailscale remote.
 cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
@@ -179,6 +196,19 @@ cat > "$HOME/.dsh/deploy/remote.cordis.yml" <<YML
             preset: minimal-no-tools
           - provider: '*'
             preset: standard
+    - id: tali-session-introspect
+      name: '$HOME/dsh/plugins/session-introspect/index.js'
+      config:
+        scope: all
+    - id: tali-fs-tools
+      name: '$HOME/dsh/plugins/fs-tools/index.js'
+    - id: tali-foreign-link-opener
+      name: '$HOME/dsh/plugins/foreign-link-opener/index.js'
+      config:
+        app: /Applications/Safari.app
+        when: auto
+    - id: tali-settings-shortcut
+      name: '$HOME/dsh/plugins/settings-shortcut/index.js'
     - id: tali-local-model-supervisor
       name: '$HOME/dsh/plugins/local-model-supervisor/index.js'
       config:
