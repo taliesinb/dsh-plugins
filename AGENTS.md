@@ -2,7 +2,8 @@
 
 Tali's out-of-tree work on DeepSeek Harness (DSH): **plugin code** under
 `plugins/`, **recipes** (one Markdown file per completed setup/change) under
-`recipes/`, and helper scripts under `tools/`. This file is the onboarding
+`recipes/`, helper scripts under `tools/`, and the DSH fork itself as the
+submodule `deepseek-harness/`. Setting up a fresh Mac: [INSTALLING.md](INSTALLING.md). This file is the onboarding
 guide for agents working here: how DSH plugins work, how this repo is laid
 out, where the authoritative docs live, and how to record what you did.
 
@@ -24,7 +25,7 @@ out, where the authoritative docs live, and how to record what you did.
 | Symbol | Meaning | What belongs there |
 |---|---|---|
 | `<plugins>` | **this repo** | All plugin code (`plugins/<name>/`), recipes (`recipes/`), helper tools (`tools/`), the dev overlay `cordis.dev.yml` |
-| `<dsh-src>` | the DSH **source checkout** (the git clone that `pnpm dsh web` runs from) | Read-only reference for APIs, docs (`docs/`), shipped presets. Never fork/patch it to add features; extend via plugins |
+| `<dsh-src>` | the DSH **source checkout** — Tali's fork (`taliesinb/deepseek-harness`, branch `feat/embed-session`) as this repo's git **submodule `deepseek-harness/`**; the clone that `pnpm dsh web` runs from | Reference for APIs, docs (`docs/`), shipped presets. Fork commits live there (Remotes/embed/tailscale-mounting); ordinary features are plugins, not fork patches. Bump the submodule pin (`git add deepseek-harness`) when the fork moves |
 | `$DSH_HOME` | the DSH home, default `~/.dsh` | Configuration, not code: `settings.yaml` (providers, models), `.agent-presets/`, `profiles/web/cordis.patch.yml` (which plugins the live web GUI runs), `sessions/`, `attachments/` |
 | `<recipes-ws>` | Tali's **recipes workspace** — a code-free directory used as a session cwd whose `AGENTS.md` just points here | Nothing; recipes live in `<plugins>/recipes/` |
 
@@ -37,8 +38,8 @@ Absolute paths are unavoidable in one place and are tolerated there:
 `cordis.dev.yml` rows (`name:` must be an absolute module path; the loader's
 `!!js` interpolation covers `config` only) — regenerate it if the checkout or
 this repo moves. The plugins' `link:` dependencies are **relative**
-(`link:../../../deepseek-harness/...`), so the two repos must be siblings under
-one parent directory. The repo is **not** local-only: it is pushed
+(`link:../../deepseek-harness/...`, i.e. the submodule), so the fork must be
+checked out there (`git submodule update --init`). The repo is **not** local-only: it is pushed
 to `origin` (https://github.com/taliesinb/dsh-plugins), so commit finished
 work and `git push`; anything machine-specific (those absolute paths, `~`
 paths in recipes) is documented as such rather than assumed.
@@ -272,8 +273,8 @@ through it.
 
 Each plugin declares `link:` devDependencies pointing into the checkout
 (`vendor/cordis`, `packages/client/ui-slots`, ...) so `pnpm typecheck` sees
-the real d.ts files. Links are relative (`link:../../../deepseek-harness/...`),
-so keep the checkout next to this repo. `@modelcontextprotocol/sdk` and `sharp`
+the real d.ts files. Links are relative to the submodule
+(`link:../../deepseek-harness/...`). `@modelcontextprotocol/sdk` and `sharp`
 are ordinary npm dependencies pinned to the checkout's versions, not links into
 its `.pnpm` store (since `5785d17`). esbuild does not type-check; the build
 works even if types drift.

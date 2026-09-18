@@ -1,19 +1,23 @@
 # tali-dash-plugins
 
-Local-only plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH).
-One directory per plugin under `plugins/`. See `AGENTS.md` for the full development guide.
+Tali's plugins for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH),
+one directory per plugin under `plugins/`, plus Tali's DSH fork as the git
+submodule `deepseek-harness/`. Clone with `--recurse-submodules`. See
+`AGENTS.md` for the development guide and **`INSTALLING.md`** for setting up
+a fresh Mac (fork build, plugins, Dock app, Tailscale remote).
 
 ## Quick start
 
 ```sh
-cd plugins/agent-status-indicator
-pnpm install
-pnpm build          # or: pnpm watch
-
-# from the DSH source checkout:
-cd <dsh-src>
-pnpm dsh web --patch <this repo>/cordis.dev.yml
+git clone --recurse-submodules https://github.com/taliesinb/dsh-plugins tali-dash-plugins
+cd tali-dash-plugins/deepseek-harness && pnpm install && pnpm run build   # the fork
+cd .. && for p in plugins/*/; do (cd "$p" && pnpm install); done           # plugin deps (build client plugins: pnpm build)
+pnpm install-plugins                     # all live plugins into ~/.dsh/profiles/web as bundles
+cd deepseek-harness && pnpm dsh web      # run
 ```
+
+Tooling: `pnpm install-plugins` / `remove-plugins`, `pnpm deploy-remote user@host`
+(ship the built fork to another Mac), `pnpm remote-status|logs|restart|stop`.
 
 Recipes — one Markdown file per completed DSH setup/change, written so a
 future agent can reproduce it — live in `recipes/` (index in `AGENTS.md`).
