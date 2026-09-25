@@ -1052,9 +1052,15 @@ if wants tailnet && [ "$TAILNET" = 1 ]; then
         elif patch_set_row "$PATCH" tali-tailscale-remote "$TSR_ROW"; then ok "$PATCH: tali-tailscale-remote → proxy :$PROXY_PORT, relay :$RELAY_PORT, route $MOUNT, Dock app $DOCK_NAME"
         else die "no yaml package in the checkout to edit $PATCH"; fi
       fi
-      # 2. Relay LaunchAgent (relay → proxy; starts `dsh web` on demand).
+      # 2. Relay LaunchAgent (relay → proxy; starts `dsh web` on demand). A LaunchAgent needs this account's GUI
+      #    login session to load into; an ssh-only install on a shared machine has none, so there the plist is
+      #    written unloaded (it loads at the account's first login, or the host's administrator turns it into a
+      #    per-user LaunchDaemon) and the checks that need a running relay below are skipped.
+      GUI_SESSION=1; launchctl print "gui/$(id -u)" >/dev/null 2>&1 || GUI_SESSION=0
       if launchctl print "gui/$(id -u)/$RELAY_LABEL" >/dev/null 2>&1; then ok "relay LaunchAgent present"
-      else run_in "$PLUG" pnpm relay:install --cwd "$CK" --listen "127.0.0.1:$RELAY_PORT" --backend "127.0.0.1:$PROXY_PORT" --dsh "127.0.0.1:$WEB_PORT" --start "$START" || die "relay:install failed"; fi
+      elif [ "$GUI_SESSION" = 1 ]; then run_in "$PLUG" pnpm relay:install --cwd "$CK" --listen "127.0.0.1:$RELAY_PORT" --backend "127.0.0.1:$PROXY_PORT" --dsh "127.0.0.1:$WEB_PORT" --start "$START" || die "relay:install failed"
+      else run_in "$PLUG" pnpm relay:install --no-load --cwd "$CK" --listen "127.0.0.1:$RELAY_PORT" --backend "127.0.0.1:$PROXY_PORT" --dsh "127.0.0.1:$WEB_PORT" --start "$START" || die "relay:install failed"
+           todo "no GUI login session for $USER: the relay LaunchAgent is written but not running — log this account in once, or (shared machine) have the administrator convert it to a LaunchDaemon"; fi
       # 3. Enable the route: the plugin republishes `tailscale serve … --set-path /dsh` on every boot from this state file.
       STATE="$DSH_HOME_DIR/tailscale-remote.json"
       if [ "$DRY" = 1 ]; then log "would write $STATE (enabled: true) and start the relay"
@@ -1073,13 +1079,17 @@ console.log('    tailscale-remote.json: enabled, allowed users ' + JSON.stringif
 JS
         # The plugin reads the state file at boot: if our dsh is already up and the allowlist changed, restart it.
         if [ -e "$STATE.changed" ]; then rm -f "$STATE.changed"; lsof -ti tcp:"$WEB_PORT" -sTCP:LISTEN 2>/dev/null | xargs kill 2>/dev/null || true; sleep 2; fi
-        launchctl kickstart -k "gui/$(id -u)/$RELAY_LABEL" 2>/dev/null || true
-        log "poking the relay (starts dsh web; ~10 s on a cold start)"
-        curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$RELAY_PORT/" || true
-        wait_http "http://127.0.0.1:$RELAY_PORT/" 401 120 || die "DSH did not come up behind the relay (logs: $DSH_HOME_DIR/logs/{relay,dsh-web}.log)"
-        ok "dsh web is up behind the relay (:$RELAY_PORT → :$PROXY_PORT → :$WEB_PORT)"
-        for _ in $(seq 1 30); do "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && break; sleep 1; done
-        "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && ok "tailscale serve publishes $MOUNT" || warn "no $MOUNT in tailscale serve status yet (MagicDNS + HTTPS certs must be enabled on the tailnet; see Settings → Tailscale remote)"
+        if [ "$GUI_SESSION" = 1 ]; then
+          launchctl kickstart -k "gui/$(id -u)/$RELAY_LABEL" 2>/dev/null || true
+          log "poking the relay (starts dsh web; ~10 s on a cold start)"
+          curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$RELAY_PORT/" || true
+          wait_http "http://127.0.0.1:$RELAY_PORT/" 401 120 || die "DSH did not come up behind the relay (logs: $DSH_HOME_DIR/logs/{relay,dsh-web}.log)"
+          ok "dsh web is up behind the relay (:$RELAY_PORT → :$PROXY_PORT → :$WEB_PORT)"
+          for _ in $(seq 1 30); do "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && break; sleep 1; done
+          "$TS" serve status 2>/dev/null | grep -q "$MOUNT " && ok "tailscale serve publishes $MOUNT" || warn "no $MOUNT in tailscale serve status yet (MagicDNS + HTTPS certs must be enabled on the tailnet; see Settings → Tailscale remote)"
+        else
+          log "relay not started (no GUI session): the route $MOUNT is published by the plugin when dsh web first runs"
+        fi
       fi
       # 4. Dock app (needs swiftc). Rebuilt on --replace: a deploy-remote.sh app points its fallback at the proxy, ours at the relay.
       DOCK_URL_ARGS=(--name "$DOCK_NAME" --fallback "http://127.0.0.1:$RELAY_PORT/")

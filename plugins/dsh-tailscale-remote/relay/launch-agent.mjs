@@ -194,15 +194,34 @@ export async function relayStatus(options) {
   return { supported: true, installed, loaded, pid: Number.isFinite(pid) ? pid : undefined, listening, plist, label, logDir: defaultLogDir(), command, daemon }
 }
 
+/** Whether this account has a GUI login session (the launchd domain a LaunchAgent can be bootstrapped into). */
+export async function hasGuiSession() {
+  return (await launchctl(['print', domain()])).code === 0
+}
+
 /**
  * Write the plist and (re)load the agent; resolves once the port answers (or after 8 s).
- * @param {Parameters<typeof relayCommand>[0] & { log?: (line: string) => void }} spec
+ * With `load: false` only the plist (and the named Node symlink) are written: for an
+ * account with no GUI session (ssh-only install on a shared machine), where the plist is
+ * then converted to a LaunchDaemon by the host's administrator or picked up at first login.
+ * @param {Parameters<typeof relayCommand>[0] & { log?: (line: string) => void, load?: boolean }} spec
  */
 export async function installRelayAgent(spec) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
   const log = spec.log ?? (() => {})
   const instance = spec.instance ?? ''
   if (await daemonInstalled(instance)) throw daemonManagedError('reinstalling it')
+  if (spec.load === false) {
+    const plist = plistPath(instance)
+    await mkdir(spec.logDir, { recursive: true })
+    await mkdir(dirname(plist), { recursive: true })
+    await mkdir(supportDir(), { recursive: true })
+    await rm(relayExecutable(instance), { force: true })
+    await symlink(process.execPath, relayExecutable(instance))
+    await writeFile(plist, launchAgentPlist(spec))
+    log(`relay: LaunchAgent ${labelFor(instance)} written, not loaded (${plist})`)
+    return { listening: false, loaded: false }
+  }
   const label = labelFor(instance)
   const plist = plistPath(instance)
   await mkdir(spec.logDir, { recursive: true })
