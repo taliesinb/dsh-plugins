@@ -410,6 +410,30 @@ can reproduce or maintain it:
   Then the row `config` was retired: a brand is only ever a profile
   (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
   = shipped look).
+- `bundled-app-dmg.md` — the self-hosting `DSH Canary.app` (red whale) in a
+  DMG (2026-09-23/24, milestones 1 + 3): why not `bootstrap-mac.sh`'s global installs and why the
+  Swift wrapper rather than upstream's Electron shell; `pnpm build-app`
+  (`tools/bundle/`: sha256-verified Node 24 LTS, `stage-dsh.mjs` packing all
+  304 fork packages + the plugins of `plugins.txt` and installing with
+  pnpm-workspace.yaml overrides, `build-app.mjs` pruning 455 MB — declarations,
+  maps, `.ts` sources, other-platform prebuilds, the 259 MB LibreOffice engine
+  unless `--with-office` — then signing ad-hoc and running hdiutil: 268 MB app,
+  88 MB DMG); `EmbeddedServer.swift` (profile `app` created/
+  merged from the bundled template, `zsh -lc` spawn, token URL from stdout,
+  SIGTERM → quit) and the `app-lifeline` plugin against orphaned servers; the
+  traps — `pnpm deploy` drops `workspace:^` peers, pnpm 12 ignores
+  `pnpm.overrides` and silently pulls UPSTREAM's npm packages, `allowBuilds`
+  keys in `@file:` form, symlinked `/tmp`, app-boot's dependency-graph BFS from
+  `@deepseek-ai/dsh/package.json` (plugins anchored there), two plugins'
+  incomplete `files`, hdiutil under the sandbox; sizes. **Updates**:
+  `pnpm release-app` (`release.mjs`: `YYYYMMDDnn` build number →
+  `CFBundleVersion`, calver display version, `gh release create canary-N`
+  with the DMG + `.sha256`, `--latest`) and `Updater.swift` (GitHub
+  `releases/latest` on launch + 6-hourly + Check for Updates…, prompt with
+  notes, download → SHA-256 → hdiutil → `cp -R` beside the bundle → Trash →
+  rename → relaunch after the old pid exits; translocation/unwritable
+  preflight; `dsh.update.autoInstall` default for headless tests; measured
+  with a local fake feed). Milestone 2 (first-run dialog) still designed only.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the

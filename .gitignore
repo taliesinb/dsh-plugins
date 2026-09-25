@@ -3,3 +3,4 @@ lib/
 *.tsbuildinfo
 .DS_Store
 cordis.dev.local.yml
+dist/

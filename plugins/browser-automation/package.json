@@ -12,12 +12,7 @@
   },
   "files": [
     "index.js",
-    "curated-tools.mjs",
-    "windows.mjs",
-    "servers.mjs",
-    "reader-pool.mjs",
-    "youtube-notes.mjs",
-    "safari-screenshot.mjs",
+    "*.mjs",
     "lib/client.js",
     "lib/client.js.map",
     "cordis.patch.yml"
@@ -51,7 +46,7 @@
     "@deepseek-ai/schemastery": "link:../../deepseek-harness/vendor/schemastery",
     "@modelcontextprotocol/sdk": "1.29.0",
     "chrome-devtools-mcp": "1.9.0",
-    "sharp": "0.35.3"
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",

@@ -1,0 +1,28 @@
+# Plugins shipped inside the bundled macOS app (one directory name under plugins/ per line).
+# Same set as tools/install-plugins.sh PLUGINS plus the app-only lifeline. Private plugins
+# (extras/) are never bundled: the DMG is a public artefact.
+dsh-tailscale-remote
+instance-identity
+enforce-model-preset
+browser-automation
+dash-docsets
+local-model-supervisor
+foreign-link-opener
+session-introspect
+fs-tools
+settings-shortcut
+session-title-slug
+dsh-remote-workspaces
+numbered-switching
+import-api-keys
+reload-on-restart
+transcript-grace-margin
+phone-ui
+wait-tool
+reboot-command
+brand-kit
+chat-title
+# import-sessions: NOT bundled until its host modules are committed — index.js imports
+# ./lib/{claude-reader,importer,pi-reader,picker,sources,uploads,hosts}.mjs, which the root
+# .gitignore's `lib/` rule swallowed; a fresh clone (and therefore this bundle) fails to import it.
+app-lifeline
