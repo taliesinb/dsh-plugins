@@ -4,8 +4,8 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
-import { UploadStore, sanitizeRelativePath } from '../lib/uploads.mjs'
-import { classifySelection, scanSelection } from '../lib/sources.mjs'
+import { UploadStore, sanitizeRelativePath } from '../host/uploads.mjs'
+import { classifySelection, scanSelection } from '../host/sources.mjs'
 import { claudeStore, piStore } from './fixtures.mjs'
 
 test('relative upload paths: only transcripts, never escaping', () => {

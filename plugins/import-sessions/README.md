@@ -72,10 +72,10 @@ open and are deleted after the import (or swept after a day).
 ## Layout
 
 `index.js` host (commands + control channel, see `PROTOCOL.md`) ·
-`lib/events.mjs` DSH event builder + invariant checker · `lib/claude-reader.mjs`,
-`lib/pi-reader.mjs` · `lib/sources.mjs` store discovery + scan ·
-`lib/uploads.mjs` · `lib/picker.mjs` · `lib/importer.mjs` · `src/client/` the
+`host/events.mjs` DSH event builder + invariant checker · `host/claude-reader.mjs`,
+`host/pi-reader.mjs` · `host/sources.mjs` store discovery + scan ·
+`host/uploads.mjs` · `host/picker.mjs` · `host/importer.mjs` · `src/client/` the
 modal. `pnpm check` runs the tests; `pnpm build` the browser bundle.
 
-The server-side native chooser (`lib/picker.mjs`, `pick` endpoint) is kept
+The server-side native chooser (`host/picker.mjs`, `pick` endpoint) is kept
 for the headless/API path but no longer surfaced in the dialog.

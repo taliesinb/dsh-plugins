@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { realpathSync } from 'node:fs'
-import { classifySelection, decodeSlug, dshSessionId, scanSelection } from '../lib/sources.mjs'
+import { classifySelection, decodeSlug, dshSessionId, scanSelection } from '../host/sources.mjs'
 import { claudeStore, piStore } from './fixtures.mjs'
 
 test('slug decoding is a hint only', () => {

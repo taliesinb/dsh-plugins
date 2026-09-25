@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../deepseek-harness/vendor/schemastery
+        version: link:../../deepseek-harness/vendor/schemastery
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: link:../../deepseek-harness/vendor/cordis

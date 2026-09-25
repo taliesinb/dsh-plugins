@@ -18,19 +18,19 @@
  *     `progress` — see PROTOCOL.md.
  *
  * Writes go through DSH's own services (sessionPersistence, attachments,
- * sessionProjectionCache, workspaceRegistry) — lib/importer.mjs.
+ * sessionProjectionCache, workspaceRegistry) — host/importer.mjs.
  */
 import { stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import Schema from '@deepseek-ai/schemastery'
-import { readClaudeSession } from './lib/claude-reader.mjs'
-import { ImportJobs, importTranscript } from './lib/importer.mjs'
-import { readPiSession } from './lib/pi-reader.mjs'
-import { pickPath, pickerCapability } from './lib/picker.mjs'
-import { SOURCES, collapseHome, expandHome, scanSelection } from './lib/sources.mjs'
-import { UploadStore } from './lib/uploads.mjs'
-import { peerHost, requestClient, serverHost } from './lib/hosts.mjs'
+import { readClaudeSession } from './host/claude-reader.mjs'
+import { ImportJobs, importTranscript } from './host/importer.mjs'
+import { readPiSession } from './host/pi-reader.mjs'
+import { pickPath, pickerCapability } from './host/picker.mjs'
+import { SOURCES, collapseHome, expandHome, scanSelection } from './host/sources.mjs'
+import { UploadStore } from './host/uploads.mjs'
+import { peerHost, requestClient, serverHost } from './host/hosts.mjs'
 
 export const name = 'import-sessions'
 export const inject = ['webServer', 'connection', 'commands', 'sessionPersistence', 'workspaceRegistry']

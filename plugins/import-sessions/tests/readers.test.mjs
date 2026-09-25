@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readClaudeSession, listClaudeSubagents } from '../lib/claude-reader.mjs'
-import { readPiSession, readPiTree } from '../lib/pi-reader.mjs'
-import { EventBuilder, checkInvariant, detUuid } from '../lib/events.mjs'
+import { readClaudeSession, listClaudeSubagents } from '../host/claude-reader.mjs'
+import { readPiSession, readPiTree } from '../host/pi-reader.mjs'
+import { EventBuilder, checkInvariant, detUuid } from '../host/events.mjs'
 import { claudeStore, piStore } from './fixtures.mjs'
 
 const byType = events => events.reduce((bag, e) => { bag[e.type] = (bag[e.type] ?? 0) + 1; return bag }, {})
