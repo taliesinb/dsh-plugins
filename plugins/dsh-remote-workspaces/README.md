@@ -55,10 +55,19 @@ needed because the Serve certificate names the FQDN — `https://studio/` fails 
 workspaces (mirrored ones grayed) and **New workspace**. Picking it shows a
 path field that starts at `~/` and talks to the remote *while you type*: every
 keystroke (120 ms debounce) asks the local host `servers.inspectPath`, which
-goes through the egress to the **remote's own dsh-remote-workspaces**
-control channel (`POST <remote>/remote-workspaces/fs.inspect` — `callControl`
-in egress.mjs, the same envelope as the `/api` calls). The remote answers for
-its filesystem: `~` expanded against *its* home, `kind` (directory / file /
+goes through the egress to the remote by whichever of two doors it has
+(`remote-fs.mjs`): the **remote's own dsh-remote-workspaces** control channel
+(`POST <remote>/remote-workspaces/fs.inspect` — `callControl` in egress.mjs,
+the same envelope as the `/api` calls; one round-trip, `stat`-exact), else
+**DSH's own `directoryPicker` Remote** there (`list(path)` /
+`createDirectory(parent, name)`, the in-app directory browser's primitives,
+present on every instance whose composed picker is the `browse` backend —
+every relay-started / headless instance of the fork; kind and creatability are
+read off the listing failures' `ENOENT` / `ENOTDIR`, `~` from the listing's
+`home`, and a missing directory is made segment by segment from the nearest
+listable ancestor). Once the plugin door answered "no such endpoint" the egress
+remembers it and later keystrokes go straight to the picker. Either way the
+answer is the remote's view of its filesystem: `~` expanded against *its* home, `kind` (directory / file /
 missing), `creatable` (nearest existing ancestor is a directory), and the
 completion candidates — child directories of the typed directory whose names
 start with the typed last segment (hidden ones only when the segment starts
@@ -75,12 +84,17 @@ workspace (grayed when this sidebar already mirrors it). Done sends the
 remote to `fs.mkdir` (`mkdir -p`) before `workspace.create`, which itself
 requires an existing directory.
 
-A remote **without** this plugin (or with one from before 2026-09-24) answers
-its 404 page / `unknown-endpoint`; the local host maps both to
-`remote-workspaces/fs-unavailable` and the field falls back to the old rule
-(gray note; an absolute path that already exists; no completion, no `~`).
-The same fallback shows while the *local* host still runs the older plugin
-(host module edits need a `dsh web` restart).
+A remote with **neither** door — no plugin *and* no browse picker (a native
+OS-chooser picker answers `directory-picker/unavailable`; a DSH without the
+namespace answers its 404 page) — is reported `remote-workspaces/fs-unavailable`
+and the field falls back to the old rule: orange **Caution: server is running
+an older version**, Done takes an absolute path on trust (no completion, no
+`~`, no creation). The same line shows while the *local* host still runs a
+plugin from before `servers.inspectPath` (host module edits need a `dsh web`
+restart). Why two doors (2026-09-25): a shared server whose instances must not
+act as remote-workspace *clients* runs no dsh-remote-workspaces at all (host
+policy), which from 2026-09-24 to 09-25 also silenced the path field for every
+laptop adding it — the picker door needs nothing installed on the remote.
 
 Security: `fs.inspect` / `fs.mkdir` are served on this host's control channel
 for peers and are gated like everything else (`connection.requestRejection`:
@@ -166,6 +180,7 @@ copies are the shell's own **Copy to…** (`session.copy`). Recipe:
 | `index.js` | Plugin entry: mounts `/remote/<id>` (prefix route) + `/remote/<id>/api/remote.mux` (upgrade route) per server, gated by DSH's own browser-session check; control channel. |
 | `egress.mjs` | One remote: URL facts, token exchange, header rewriting, request/upgrade forwarding, `call(ns, method, args)` (`/api`), `callControl(endpoint, args)` (the peer plugin's `/remote-workspaces`). |
 | `resolve.mjs` | Add-modal helpers: `normalizeRemoteInput` (short forms → URL, MagicDNS suffix), `inspectPath` / `makeDirectory` (the `fs.*` endpoints served for peers). |
+| `remote-fs.mjs` | The same two questions asked *of a remote*: its `fs.*` when it has the plugin, else DSH's `directoryPicker.list` / `createDirectory` there; `fs-unavailable` only when neither door exists. |
 | `state.mjs` | `$DSH_HOME/remote-workspaces.json` (0600): servers + mirrored workspaces with cached sessions. |
 | `src/client/{api,store}.ts`, `ui.tsx`, `index.tsx` | Browser half (built to `lib/client.js` by `build.mjs`): control-channel API, persisted view + runtime stores, components, slot registrations. |
 

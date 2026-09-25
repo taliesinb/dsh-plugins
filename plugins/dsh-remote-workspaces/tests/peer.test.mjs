@@ -6,7 +6,7 @@
  * Everything runs against a temp directory; no real DSH is involved.
  */
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, mkdtemp, opendir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -147,5 +147,110 @@ describe('peer fs endpoints over the egress', () => {
     } finally {
       await new Promise(resolve => { bare.closeAllConnections?.(); bare.close(() => resolve()) })
     }
+  })
+})
+
+/**
+ * A DSH without dsh-remote-workspaces but with the fork's `browse` directory
+ * picker: `/api/directoryPicker/list` + `createDirectory` over a temp
+ * directory, failing the way packages/host/directory-picker-browse does
+ * (`cannot list <p>: ENOENT: …`). The control channel answers its 404 page.
+ */
+function fakeBrowsePicker(home, calls) {
+  const answer = (res, rpcId, result) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ type: 'server-response', rpcId, result })) }
+  return createServer((req, res) => {
+    const path = new URL(req.url ?? '/', 'http://x').pathname
+    let body = ''
+    req.on('data', chunk => { body += chunk })
+    req.on('end', async () => {
+      if (!path.startsWith('/api/directoryPicker/')) { calls.push(`miss:${path}`); res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found'); return }
+      const message = JSON.parse(body)
+      const args = message.payload.args
+      calls.push(`picker:${path.slice('/api/directoryPicker/'.length)}`)
+      if (path.endsWith('/list')) {
+        const target = args.path ?? home
+        try {
+          const entries = []
+          for await (const dirent of await opendir(target)) if (dirent.isDirectory()) entries.push({ name: dirent.name, path: join(target, dirent.name), hidden: dirent.name.startsWith('.') })
+          entries.sort((a, b) => a.name.localeCompare(b.name))
+          return answer(res, message.rpcId, { ok: true, value: { path: target, home, crumbs: [], entries, truncated: false } })
+        } catch (error) {
+          return answer(res, message.rpcId, { ok: false, error: { code: 'directory-picker/unreadable', message: `cannot list ${target}: ${error.message}`, details: { path: target } } })
+        }
+      }
+      if (path.endsWith('/createDirectory')) {
+        const target = join(args.path, args.name)
+        try {
+          await mkdir(target)
+          return answer(res, message.rpcId, { ok: true, value: target })
+        } catch (error) {
+          return answer(res, message.rpcId, { ok: false, error: { code: error.code === 'EEXIST' ? 'directory-picker/exists' : 'directory-picker/create-failed', message: error.message, details: { path: target } } })
+        }
+      }
+      res.writeHead(404); res.end('not found')
+    })
+  })
+}
+
+describe('a remote without the plugin but with DSH\'s browse directory picker', () => {
+  let root, remoteHome, picker, port, local, localPort
+  const calls = []
+  before(async () => {
+    root = await mkdtemp(join(tmpdir(), 'rws-picker-'))
+    remoteHome = join(root, 'home')
+    await mkdir(join(remoteHome, 'projects', 'apple'), { recursive: true })
+    await mkdir(join(remoteHome, 'projects', 'apps'), { recursive: true })
+    await mkdir(join(remoteHome, 'projects', '.hidden'), { recursive: true })
+    await writeFile(join(remoteHome, 'notes.txt'), 'x')
+    picker = fakeBrowsePicker(remoteHome, calls)
+    port = await new Promise(resolve => picker.listen(0, '127.0.0.1', () => resolve(picker.address().port)))
+    local = fakeContext({ requestRejection: () => undefined })
+    localPort = await local.listen()
+    apply(local.ctx, { routePrefix: '/remote', stateFile: join(root, 'local-state.json'), servers: [] })
+  })
+  after(async () => {
+    await local.close()
+    await new Promise(resolve => { picker.closeAllConnections?.(); picker.close(() => resolve()) })
+    await rm(root, { recursive: true, force: true })
+  })
+  const url = () => `localhost:${String(port)}`
+
+  it('resolves ~ against the remote home and completes over the picker\'s listing', async () => {
+    const result = await control(localPort, 'servers.inspectPath', { url: url(), path: '~/projects/ap' })
+    assert.equal(result.ok, true, JSON.stringify(result))
+    assert.equal(result.value.home, remoteHome)
+    assert.equal(result.value.resolved, join(remoteHome, 'projects', 'ap'))
+    assert.deepEqual([result.value.kind, result.value.creatable], ['missing', true])
+    assert.deepEqual(result.value.entries.map(entry => entry.name), ['apple', 'apps'])
+    const dir = await control(localPort, 'servers.inspectPath', { url: url(), path: '~/projects/' })
+    assert.equal(dir.value.kind, 'directory')
+    assert.deepEqual(dir.value.entries.map(entry => entry.name), ['apple', 'apps'], 'dot-directories hidden unless typed')
+    const dotted = await control(localPort, 'servers.inspectPath', { url: url(), path: '~/projects/.h' })
+    assert.deepEqual(dotted.value.entries.map(entry => entry.name), ['.hidden'])
+  })
+
+  it('tells a file, a path under a file, and an existing directory apart', async () => {
+    const file = await control(localPort, 'servers.inspectPath', { url: url(), path: '~/notes.txt' })
+    assert.deepEqual([file.value.kind, file.value.creatable], ['file', false])
+    const under = await control(localPort, 'servers.inspectPath', { url: url(), path: '~/notes.txt/deeper/x' })
+    assert.deepEqual([under.value.kind, under.value.creatable, under.value.blocker], ['missing', false, join(remoteHome, 'notes.txt')])
+    const existing = await control(localPort, 'servers.inspectPath', { url: url(), path: join(remoteHome, 'projects', 'apple') })
+    assert.deepEqual([existing.value.kind, existing.value.creatable], ['directory', true])
+  })
+
+  it('knocks on the plugin door once, then goes straight to the picker (and lists the home only once)', async () => {
+    assert.equal(calls.filter(entry => entry.startsWith('miss:')).length, 1, JSON.stringify(calls))
+    assert.equal(calls[0], `miss:${CONTROL_CHANNEL}/fs.inspect`)
+    calls.length = 0
+    await control(localPort, 'servers.inspectPath', { url: url(), path: '~/projects/apple' })
+    assert.deepEqual(calls, ['picker:list', 'picker:list'], 'the directory and its parent (for completion); home already known')
+  })
+
+  it('makes a missing directory segment by segment for workspaces.add … create', async () => {
+    // The fake has no /api/workspace/*; only the mkdir leg is exercised here.
+    const refused = await control(localPort, 'workspaces.add', { url: url(), remotePath: '~/new/deeper', create: true, title: 'deep' })
+    assert.equal(refused.ok, false)
+    assert.equal((await stat(join(remoteHome, 'new', 'deeper'))).isDirectory(), true, 'directory made before workspace.create was attempted')
+    assert.match(refused.error.message, /workspace\.create/)
   })
 })

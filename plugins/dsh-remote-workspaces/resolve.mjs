@@ -30,7 +30,8 @@ import { basename, delimiter, dirname, isAbsolute, join, resolve as resolvePath 
 
 const SUFFIX_TTL_MS = 5 * 60 * 1000
 const CLI_TIMEOUT_MS = 5000
-const MAX_SUGGESTIONS = 40
+/** Completion candidates per answer (shared with remote-fs.mjs, which builds the same answer over DSH's directory picker). */
+export const MAX_SUGGESTIONS = 40
 
 // ---------------------------------------------------------------------------
 // remote input normalization

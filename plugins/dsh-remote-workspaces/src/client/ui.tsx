@@ -869,9 +869,10 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
   const trivial = current !== null && (current.resolved === current.home || current.resolved === '/')
   /** The verdict line under the field: colour + text; `ok` gates Done. */
   const verdict = useMemo((): { text: string; tone: 'muted' | 'warn' | 'error'; ok: boolean } | null => {
-    if (pathState === 'unavailable') {
-      return { tone: 'muted', ok: path.trim().startsWith('/'), text: 'This remote cannot check paths (its dsh-remote-workspaces plugin is missing or older): type an absolute directory that already exists there.' }
-    }
+    // Neither the remote's plugin nor DSH's directory picker there can be asked
+    // (a DSH from before the browse picker, or this host's own plugin predating
+    // `servers.inspectPath`): Done takes an absolute path on trust.
+    if (pathState === 'unavailable') return { tone: 'warn', ok: path.trim().startsWith('/'), text: 'Caution: server is running an older version' }
     if (pathState === 'error') return { tone: 'error', ok: false, text: pathError ?? 'cannot check the path' }
     if (current === null) return path.trim() === '' ? { tone: 'muted', ok: false, text: 'Type a directory path' } : null
     if (trivial) return { tone: 'muted', ok: false, text: 'Choose a directory inside it (for example ~/projects/thing)' }
@@ -1037,7 +1038,7 @@ export function AddRemoteModal({ model, api, useRuntime, openRemoteSession }: Fa
             </div>
           )}
           <div style={S.field}>
-            <span style={S.label}>Name in this sidebar</span>
+            <span style={S.label}>Local workspace name</span>
             <Input value={name} onChange={(event) => { setName(event.currentTarget.value); setNameTouched(true) }}
               onKeyDown={(event) => { if (event.key === 'Enter' && canDone) void done() }} />
           </div>

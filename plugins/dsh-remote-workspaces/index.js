@@ -23,6 +23,7 @@
 import os from 'node:os'
 import Schema from '@deepseek-ai/schemastery'
 import { createEgress, friendlyRemoteName, parseRemoteUrl } from './egress.mjs'
+import { createRemoteFs } from './remote-fs.mjs'
 import { createMagicDnsSuffixSource, inspectPath, makeDirectory, normalizeRemoteInput, suffixFromKnownUrls } from './resolve.mjs'
 import { defaultStateFile, generateId, loadState, normalizeState, routeIdFor, saveState } from './state.mjs'
 
@@ -303,6 +304,18 @@ export function apply(ctx, config) {
     return { egress: entry.egress, known }
   }
 
+  /**
+   * The remote's filesystem answers for one egress (remote-fs.mjs): its own
+   * plugin's `fs.*` when it has one, else DSH's `directoryPicker` primitives.
+   * One per egress so the "which door" memory and the home survive keystrokes.
+   */
+  const remoteFsByEgress = new WeakMap()
+  const remoteFsOf = (egress) => {
+    let fs = remoteFsByEgress.get(egress)
+    if (fs === undefined) { fs = createRemoteFs(egress); remoteFsByEgress.set(egress, fs) }
+    return fs
+  }
+
   /** Confirm the remote accepts this host: exchange the token if any, then list its sessions. */
   const probe = async (serverId) => {
     const entry = mounted.get(String(serverId ?? ''))
@@ -371,11 +384,11 @@ export function apply(ctx, config) {
   }
 
   /**
-   * Ask the remote's own dsh-remote-workspaces about a path on it (`~`
-   * resolved there, existence, completion candidates) — the "New workspace"
-   * field's live status. A remote without the plugin, or with one predating
-   * `fs.inspect`, answers `fs-unavailable`; the modal then falls back to
-   * "absolute path, must exist".
+   * Ask the remote about a path on it (`~` resolved there, existence,
+   * completion candidates) — the "New workspace" field's live status. Answered
+   * by the remote's own dsh-remote-workspaces when it runs one, else by DSH's
+   * directory picker there (remote-fs.mjs); a remote with neither answers
+   * `fs-unavailable` and the modal falls back to "absolute path, must exist".
    */
   const inspectRemotePath = async (url, token, path) => {
     let remote
@@ -386,11 +399,7 @@ export function apply(ctx, config) {
     }
     const offeredToken = typeof token === 'string' && token !== '' ? token : undefined
     const { egress } = egressForUrl(remote.url, offeredToken)
-    const result = await egress.callControl('fs.inspect', { path: String(path ?? '') })
-    if (!result.ok && (result.error?.code === 'remote-workspaces/unknown-endpoint' || result.error?.code === 'remote-workspaces/bad-response')) {
-      return fail('fs-unavailable', 'the remote DSH cannot inspect paths (its dsh-remote-workspaces plugin is missing or older)', { error: result.error })
-    }
-    return result
+    return remoteFsOf(egress).inspect(String(path ?? ''))
   }
 
   /** Find or register the server for a URL; a token offered here becomes the stored one. */
@@ -476,15 +485,17 @@ export function apply(ctx, config) {
       if (typeof args.remotePath === 'string' && args.remotePath.trim() !== '') {
         let target = args.remotePath.trim()
         // `~` is the remote account's home and a missing directory is made
-        // there (`create`), both through the remote's own plugin; a remote
-        // without it takes only an existing absolute path, as before.
+        // there (`create`), through the remote's own plugin or DSH's directory
+        // picker there (remote-fs.mjs); a remote with neither takes only an
+        // existing absolute path, as before.
         if (target.startsWith('~') || args.create === true) {
-          const inspected = await egress.callControl('fs.inspect', { path: target })
+          const fs = remoteFsOf(egress)
+          const inspected = await fs.inspect(target)
           if (!inspected.ok) return fail('remote', `cannot resolve "${target}" on ${server.label}: ${inspected.error?.message ?? inspected.error?.code ?? 'failed'}`)
           target = inspected.value.resolved
           if (inspected.value.kind === 'missing') {
             if (args.create !== true) return fail('remote', `${target} does not exist on ${server.label}`)
-            must(await egress.callControl('fs.mkdir', { path: target }), 'fs.mkdir')
+            must(await fs.mkdir(target), 'fs.mkdir')
           }
         }
         view = must(await egress.call('workspace', 'create', { request: { path: target } }), 'workspace.create').workspace
