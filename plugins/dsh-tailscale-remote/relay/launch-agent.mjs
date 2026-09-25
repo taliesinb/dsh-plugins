@@ -60,6 +60,34 @@ function domain() {
   return `gui/${String(userInfo().uid)}`
 }
 
+/**
+ * A shared machine may host the relay as a per-user LaunchDaemon instead
+ * (`/Library/LaunchDaemons/<label>.<login>.plist`, `UserName` = this account),
+ * so DSH is up after a reboot with nobody logged in. The plist is root-owned;
+ * this code only recognises it: status reads `system/<label>.<login>` (readable
+ * without root), while install/stop/restart of the daemon itself are the host
+ * admin's job (they need root), so those report that instead of failing oddly.
+ * @returns {{ plist: string, label: string, target: string }}
+ */
+function daemonSpec(instance = '') {
+  const label = `${labelFor(instance)}.${userInfo().username}`
+  return { plist: `/Library/LaunchDaemons/${label}.plist`, label, target: `system/${label}` }
+}
+
+async function daemonInstalled(instance = '') {
+  try {
+    await stat(daemonSpec(instance).plist)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function daemonManagedError(action) {
+  const { plist } = daemonSpec()
+  return new Error(`this relay runs as a LaunchDaemon (${plist}), managed by the machine's administrator: ${action} needs root — sudo launchctl kickstart -k system/<label> (restart) or bootout (stop) on the host`)
+}
+
 /** POSIX single-quote shell quoting. */
 export function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`
@@ -142,9 +170,12 @@ async function launchctl(args) {
  */
 export async function relayStatus(options) {
   const instance = options.instance ?? ''
-  const label = labelFor(instance)
-  const plist = plistPath(instance)
+  let label = labelFor(instance)
+  let plist = plistPath(instance)
+  let target = `${domain()}/${label}`
   if (process.platform !== 'darwin') return { supported: false, installed: false, loaded: false, listening: false, plist, label }
+  const daemon = await daemonInstalled(instance)
+  if (daemon) ({ plist, label, target } = daemonSpec(instance))
   let installed = false
   let command
   try {
@@ -156,11 +187,11 @@ export async function relayStatus(options) {
   } catch {
     installed = false
   }
-  const print = await launchctl(['print', `${domain()}/${label}`])
+  const print = await launchctl(['print', target])
   const loaded = print.code === 0
   const pid = loaded ? Number(/^\s*pid = (\d+)/m.exec(print.stdout)?.[1]) : undefined
   const listening = await isListening({ host: '127.0.0.1', port: options.listenPort }, 500)
-  return { supported: true, installed, loaded, pid: Number.isFinite(pid) ? pid : undefined, listening, plist, label, logDir: defaultLogDir(), command }
+  return { supported: true, installed, loaded, pid: Number.isFinite(pid) ? pid : undefined, listening, plist, label, logDir: defaultLogDir(), command, daemon }
 }
 
 /**
@@ -171,6 +202,7 @@ export async function installRelayAgent(spec) {
   if (process.platform !== 'darwin') throw new Error('the relay LaunchAgent is macOS-only')
   const log = spec.log ?? (() => {})
   const instance = spec.instance ?? ''
+  if (await daemonInstalled(instance)) throw daemonManagedError('reinstalling it')
   const label = labelFor(instance)
   const plist = plistPath(instance)
   await mkdir(spec.logDir, { recursive: true })
@@ -226,12 +258,14 @@ export async function uninstallRelayAgent({ instance = '', log = () => {} } = {}
 
 /** Unload the relay without removing its plist (a later `installRelayAgent` or login brings it back). */
 export async function stopRelayAgent(instance = '') {
+  if (await daemonInstalled(instance)) throw daemonManagedError('stopping it')
   const result = await launchctl(['bootout', `${domain()}/${labelFor(instance)}`])
   if (result.code !== 0 && !/No such process|not find/i.test(result.stderr)) throw new Error(`launchctl bootout failed: ${result.stderr.trim()}`)
 }
 
 /** Restart the relay (and with it the DSH it spawned, which the relay stops on SIGTERM). */
 export async function restartRelayAgent(instance = '') {
+  if (await daemonInstalled(instance)) throw daemonManagedError('restarting it')
   const result = await launchctl(['kickstart', '-k', `${domain()}/${labelFor(instance)}`])
   if (result.code !== 0) throw new Error(`launchctl kickstart failed: ${result.stderr.trim()}`)
 }
