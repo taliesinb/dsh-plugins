@@ -167,12 +167,13 @@ function TriCheckbox({ state, disabled, title, onChange }: { state: 'none' | 'so
   )
 }
 
-function WorkspaceRow({ workspace, selected, existing, destination, newBase, onToggleAll, onDestination }: {
+function WorkspaceRow({ workspace, selected, existing, destination, newBase, remoteDirs, onToggleAll, onDestination }: {
   workspace: ScanWorkspace
   selected: ReadonlySet<string>
   existing: SourcesResult['workspaces']
   destination: DestinationValue
   newBase: string
+  remoteDirs: boolean
   onToggleAll: (files: string[], next: boolean) => void
   onDestination: (value: DestinationValue) => void
 }) {
@@ -194,7 +195,7 @@ function WorkspaceRow({ workspace, selected, existing, destination, newBase, onT
       </td>
       <td colSpan={5} style={{ padding: '6px 8px', verticalAlign: 'middle', minWidth: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-          {!workspace.dirExists && (
+          {!workspace.dirExists && !remoteDirs && (
             <Tooltip label={`Directory no longer exists: ${workspace.dir}${ungroupedReason !== undefined ? ` (${ungroupedReason})` : ''}`} side="bottom">
               <span aria-label="Directory missing" style={{ color: warningColor, fontWeight: 700, cursor: 'help' }}>⚠</span>
             </Tooltip>
@@ -259,7 +260,9 @@ function SessionRow({ session, checked, parentTicked, onToggle }: { session: Sca
  * @param props.selected - selected transcript paths.
  * @param props.destinations - current select value per workspace key.
  */
-export function TreeStage({ workspaces, existing, selected, destinations, showHidden, newBase, onNewBase, onToggle, onDestination }: {
+export function TreeStage({ workspaces, existing, selected, destinations, showHidden, newBase, remoteDirs = false, onNewBase, onToggle, onDestination }: {
+  /** The transcripts came from another machine: the server's `dirExists` is not about the recording directories, so no ⚠. */
+  remoteDirs?: boolean
   workspaces: ScanWorkspace[]
   existing: SourcesResult['workspaces']
   selected: ReadonlySet<string>
@@ -332,6 +335,7 @@ export function TreeStage({ workspaces, existing, selected, destinations, showHi
               selected={selected}
               destination={destinations[workspace.key] ?? defaultDestinationValue(workspace.destination)}
               newBase={newBase}
+              remoteDirs={remoteDirs}
               onToggle={onToggle}
               onDestination={(value) => { onDestination(workspace.key, value) }}
             />
@@ -355,12 +359,13 @@ export function NewBaseField({ value, enabled, onChange }: { value: string, enab
   )
 }
 
-function WorkspaceGroup({ workspace, existing, selected, destination, newBase, onToggle, onDestination }: {
+function WorkspaceGroup({ workspace, existing, selected, destination, newBase, remoteDirs, onToggle, onDestination }: {
   workspace: ScanWorkspace
   existing: SourcesResult['workspaces']
   selected: ReadonlySet<string>
   destination: DestinationValue
   newBase: string
+  remoteDirs: boolean
   onToggle: (files: string[], next: boolean) => void
   onDestination: (value: DestinationValue) => void
 }) {
@@ -373,6 +378,7 @@ function WorkspaceGroup({ workspace, existing, selected, destination, newBase, o
         existing={existing}
         destination={destination}
         newBase={newBase}
+        remoteDirs={remoteDirs}
         onToggleAll={onToggle}
         onDestination={onDestination}
       />

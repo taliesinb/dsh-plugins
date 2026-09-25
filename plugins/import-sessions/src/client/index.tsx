@@ -384,6 +384,8 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
       break
     }
     case 'decide': {
+      // Uploaded from a machine other than the server: the recording dirs are the client's.
+      const remoteDirs = scan?.uploaded === true && sources?.client.sameMachine === false
       const total = scan?.workspaces.reduce((sum, workspace) => sum + workspace.sessions.length, 0) ?? 0
       const selectable = scan?.workspaces.reduce((sum, workspace) => sum + workspace.sessions.filter(isSelectable).length, 0) ?? 0
       const single = scan?.kind === 'session' ? scan.workspaces[0] : undefined
@@ -409,6 +411,7 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
                   existing={existing}
                   destination={destinations[single.key] ?? initialDestinationValue(single)}
                   newBase={newBase}
+                  {...remoteDirs ? { remoteDirs: { host: sources?.client.host } } : {}}
                   onDestination={(value) => { setDestination(single.key, value) }}
                 />
                 <NewBaseField value={newBase} enabled={isSelectable(only) && (destinations[single.key] ?? initialDestinationValue(single)) === 'new'} onChange={setNewBase} />
@@ -422,6 +425,7 @@ function ImportFlow({ source, rpc, onClose }: { source: Source, rpc: ClientConne
                 destinations={destinations}
                 showHidden={showHidden}
                 newBase={newBase}
+                remoteDirs={remoteDirs}
                 onNewBase={setNewBase}
                 onToggle={toggle}
                 onDestination={setDestination}

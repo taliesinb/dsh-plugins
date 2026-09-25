@@ -30,8 +30,10 @@ export const MIN_RESULT_CAP = 256
  * @param props.session - the scan's one session.
  * @param props.destination - current select value.
  */
-export function SessionCard({ workspace, session, existing, destination, newBase, onDestination }: {
+export function SessionCard({ workspace, session, existing, destination, newBase, remoteDirs, onDestination }: {
   newBase: string
+  /** The transcripts were uploaded from another machine: `dirExists` (checked on the server) says nothing about the recording directory. */
+  remoteDirs?: { host: string | undefined }
   workspace: ScanWorkspace
   session: ScanSession
   existing: SourcesResult['workspaces']
@@ -55,7 +57,9 @@ export function SessionCard({ workspace, session, existing, destination, newBase
         {facts.map((fact, index) => <span key={fact}>{index > 0 ? '· ' : ''}{fact}</span>)}
       </div>
       <div style={{ ...small, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace.dir}>
-        Recorded in {tildify(workspace.dir)}{!workspace.dirExists ? <span style={{ color: warningColor }}> (directory no longer exists)</span> : null}
+        Recorded in {tildify(workspace.dir)}{remoteDirs !== undefined
+          ? <span> on {remoteDirs.host ?? 'your device'}</span>
+          : !workspace.dirExists ? <span style={{ color: warningColor }}> (directory no longer exists)</span> : null}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 2 }}>
         <span style={{ fontWeight: 600 }}>Import to</span>
