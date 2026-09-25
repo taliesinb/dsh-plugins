@@ -96,18 +96,33 @@ export class BrowserSessions {
     const id = this.id(session, 'safari', windowIndex)
     const spec = this.options.safariSpec(session, windowIndex)
     const window = { id, conn: undefined }
-    window.conn = await connectServer({
-      ...spec,
-      safari: true,
-      timeoutMs: this.options.timeoutMs,
-      onClose: () => {
-        if (session.safari.get(windowIndex) === window) {
-          session.safari.delete(windowIndex)
-          this.options.trace({ event: 'safari-window-lost', id: agent.id, windowId: id })
-        }
-      },
-      onError: (error) => this.options.logger.warn(`browser-automation: ${id} transport error: ${String(error)}`),
-    })
+    // safaridriver explains a refusal to start only on stderr ("could not launch because it is not configured
+    // correctly or you need to authenticate", i.e. Remote Automation off — or no GUI session to check it in) and
+    // then exits, which the MCP client reports as a bare "Connection closed". Keep its last lines for the error.
+    const stderr = []
+    try {
+      window.conn = await connectServer({
+        ...spec,
+        safari: true,
+        timeoutMs: this.options.timeoutMs,
+        onStderr: (line) => {
+          stderr.push(line); if (stderr.length > 6) stderr.shift()
+          this.options.logger.warn(`browser-automation: ${id} safaridriver: ${line}`)
+          this.options.trace({ event: 'safari-stderr', id: agent.id, windowId: id, line })
+        },
+        onClose: () => {
+          if (session.safari.get(windowIndex) === window) {
+            session.safari.delete(windowIndex)
+            this.options.trace({ event: 'safari-window-lost', id: agent.id, windowId: id })
+          }
+        },
+        onError: (error) => this.options.logger.warn(`browser-automation: ${id} transport error: ${String(error)}`),
+      })
+    } catch (error) {
+      if (stderr.length === 0) throw error
+      const said = stderr.join(' ').replace(/\s+/g, ' ').trim()
+      throw new Error(`${error instanceof Error ? error.message : String(error)} — safaridriver said: ${said}`, { cause: error })
+    }
     session.safari.set(windowIndex, window)
     this.touch(agent)
     this.options.trace({ event: 'safari-open', id: agent.id, windowId: id })

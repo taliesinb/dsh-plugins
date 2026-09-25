@@ -15,9 +15,15 @@
  *   a secure per-user store; `defaults` does not see it), so it is detected
  *   only from the WebDriver error text (`WebDriverErrorDomain Code=6` /
  *   "Allow remote automation") at call time.
+ * - No GUI login session: both browsers need the WindowServer. A DSH started
+ *   by a LaunchDaemon (shared machine, nobody logged in) or over ssh has none;
+ *   `safaridriver --mcp` then exits silently (status 0, nothing on stderr) and
+ *   Chrome's new headless crashes, which reach the plugin only as "Connection
+ *   closed" / "Target closed". `launchctl print gui/<uid>` tells the two cases
+ *   apart, and the relay's daemon plist tells whether logging in would help.
  */
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 
@@ -70,6 +76,50 @@ export function checkSafariTechnologyPreview(driverPath) {
 }
 
 /**
+ * Does this process run inside a GUI login session (macOS)? Cached for 30 s: a
+ * session appears when the user logs in, and vanishes when they log out.
+ * Non-darwin: true (no WindowServer concept to be missing).
+ */
+let guiCache
+export function hasGuiSession() {
+  if (process.platform !== 'darwin') return true
+  if (guiCache !== undefined && Date.now() - guiCache.at < 30_000) return guiCache.value
+  let value = true
+  try {
+    execFileSync('/bin/launchctl', ['print', `gui/${String(userInfo().uid)}`], { stdio: 'ignore', timeout: 3000 })
+  } catch {
+    value = false
+  }
+  guiCache = { at: Date.now(), value }
+  return value
+}
+
+/** The relay plist a shared-machine administrator installs to run this account's DSH as a LaunchDaemon. */
+function relayDaemonPlist() {
+  return `/Library/LaunchDaemons/io.github.taliesinb.dsh-web-relay.${userInfo().username}.plist`
+}
+
+/**
+ * Why a browser cannot open a window here, when this DSH has no GUI session.
+ * @param {'chrome' | 'safari'} browser
+ */
+export function noGuiSessionRemedy(browser) {
+  const user = userInfo().username
+  const which = browser === 'safari' ? 'Safari Technology Preview (safaridriver --mcp exits at once, silently)' : 'Google Chrome (its headless mode still drives an invisible real window)'
+  const daemon = existsSync(relayDaemonPlist())
+  const how = daemon
+    ? `This DSH server is started by a LaunchDaemon (${relayDaemonPlist()}), so it never has a GUI session — not even while the account is logged in; logging in changes nothing for a running or daemon-restarted server.`
+    : `This DSH server was started outside a GUI login session (over ssh, or from a daemon), so it has no window server; a process does not join a session that starts later.`
+  const fix = daemon
+    ? `${ASK_USER}for browser work use a DSH on a Mac with a logged-in desktop (e.g. your own), or have the administrator run this account's DSH from a GUI login session instead of the daemon (log \`${user}\` in on this Mac via Fast User Switching and revert the relay to a LaunchAgent).`
+    : `${ASK_USER}log the macOS account \`${user}\` in on this Mac (Fast User Switching), then start DSH from inside that session (the relay LaunchAgent does; or a Terminal there) and retry.`
+  const alt = browser === 'safari'
+    ? 'There is no headless Safari; the chrome_* tools work without a session only when the plugin is configured for chrome-headless-shell (chrome.headless with an executablePath to it), not otherwise.'
+    : 'Without a session only chrome-headless-shell (old headless) can run: configure chrome.headless plus an executablePath to it. The safari_* tools cannot work here at all.'
+  return `no GUI login session for user \`${user}\` on this machine, which ${which} needs to open a window. ${how} ${fix} ${alt}`
+}
+
+/**
  * Classify a runtime failure from either browser server as an environment
  * problem the user must fix, or `undefined` when it is an ordinary tool error.
  * @param {'chrome' | 'safari'} browser
@@ -79,8 +129,15 @@ export function checkSafariTechnologyPreview(driverPath) {
  * @returns {string | undefined} the user-facing remedy.
  */
 export function environmentRemedy(browser, message, context = {}) {
+  // A launch-time transport death with no GUI session is the session, whatever the browser says (nothing, usually).
+  if (/Connection closed|Target closed|Session closed|Failed to launch|could not launch|Bus error|not configured correctly or you need to authenticate/i.test(message) && !hasGuiSession()) {
+    return noGuiSessionRemedy(browser)
+  }
   if (browser === 'safari') {
-    if (/WebDriverErrorDomain Code=6|Allow remote automation|Allow Remote Automation/i.test(message)) return STP_REMOTE_AUTOMATION_REMEDY
+    if (/Allow remote automation|Allow Remote Automation|not configured correctly or you need to authenticate/i.test(message)) return STP_REMOTE_AUTOMATION_REMEDY
+    // Code=6 is WebDriver's generic "session not created"; only the Remote-Automation wording means that switch.
+    if (/WebDriverErrorDomain Code=6/i.test(message) && !/Unable to launch a compatible Safari/i.test(message)) return STP_REMOTE_AUTOMATION_REMEDY
+    if (/Unable to launch a compatible Safari/i.test(message)) return `${ASK_USER}Safari Technology Preview could not be launched for automation (WebDriver could not create a session). Open Safari Technology Preview once by hand on this Mac (it may be showing an update or first-launch dialog), quit it, then retry.`
     if (/no safaridriver at|safaridriver.*(ENOENT|not found)/i.test(message)) return STP_INSTALL_REMEDY
     return undefined
   }
