@@ -67,6 +67,10 @@
 //   { "name": "DSH", "url": "https://node.ts.net/dsh/",
 //     "fallbackUrl": "http://127.0.0.1:3083/", "tokenFile": "/Users/me/.dsh/tailscale-remote.json",
 //     "glyphColor": "#0090FF" }   // icon glyph colour; absent or #000000 = stock whale in the page
+// `tokenFile` (JSON `{"token": "..."}`) is read on every connect. With a
+// `fallbackUrl` it tokens that loopback fallback (the relay's standing token);
+// WITHOUT one it tokens `url` itself — a purely local wrapper such as a
+// `pnpm canary` instance, whose per-launch token the canary tool writes there.
 //
 // Built by dock-app/build.mjs with swiftc (Command Line Tools suffice; no Xcode).
 
@@ -632,15 +636,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }.resume()
     }
 
-    func fallbackURL() -> URL? {
-        guard let base = fallbackBase else { return nil }
+    /// The token in `tokenFile` right now, or nil when the file is absent or has none.
+    func currentToken() -> String? {
         guard let file = config.tokenFile, let data = FileManager.default.contents(atPath: file),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = json["token"] as? String, !token.isEmpty else { return nil }
+        return token
+    }
+
+    func tokened(_ base: URL, token: String) -> URL {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = "/"
         components.queryItems = [URLQueryItem(name: "token", value: token)]
-        return components.url
+        return components.url!
+    }
+
+    func fallbackURL() -> URL? {
+        guard let base = fallbackBase, let token = currentToken() else { return nil }
+        return tokened(base, token: token)
+    }
+
+    /// What to load once `url` answers: itself, or — local wrapper, no fallback — itself with the file's token.
+    func entryURL() -> URL {
+        guard fallbackBase == nil, let token = currentToken() else { return remoteURL }
+        return tokened(remoteURL, token: token)
     }
 
     @objc func connect() {
@@ -652,7 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
             self.connecting = false
             if reachable {
                 self.showingOfflinePage = false
-                self.webView.load(URLRequest(url: self.remoteURL))
+                self.webView.load(URLRequest(url: self.entryURL()))
                 return
             }
             if let fallback = self.fallbackURL() {
@@ -665,6 +684,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                         self.showOffline(reason: "Neither the tailnet address nor the local relay answers. Is Tailscale connected? Is the relay LaunchAgent loaded?")
                     }
                 }
+            } else if self.config.tokenFile != nil {
+                self.showOffline(reason: "The local DSH does not answer. Start it (for a canary: pnpm canary); this window retries by itself.")
             } else {
                 self.showOffline(reason: "The tailnet address does not answer and no local fallback is configured. Is Tailscale connected?")
             }

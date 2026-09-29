@@ -174,7 +174,22 @@ preview's own, never the live ones — **never point both servers at one home**
 GUIs ends in `SessionAlreadyOwnedError`). Story and failure table:
 `recipes/dock-app-via-tailnet.md`.
 
-## Ad-hoc throwaway server (still fine for one-off tests)
+## Canary per branch: `pnpm canary` (the standard way to try a feature)
+
+```sh
+cd <plugins>/.worktrees/<branch>
+pnpm canary            # builds the plugins changed on this branch, starts a separate dsh web
+                       # on /tmp/dsh-canary/<branch>/home, credentials copied in, and launches
+                       # a Dock app "DSH <branch> <commit>" (red whale) pointed at it
+pnpm canary stop | remove | list | logs | url
+```
+
+One instance per branch (first free port from 3091), independent of the live
+DSH and the standing preview; rerunning restarts it on the same home. Details,
+options and traps: `recipes/canary-instances.md`. Run it from a **worktree**:
+from the main checkout a rebuild hot-swaps plugins the live server serves.
+
+## Ad-hoc throwaway server (what `pnpm canary` automates)
 
 A third `dsh web` against a `/tmp` home, e.g. for a patch you do not want in
 `cordis.dev.yml`:

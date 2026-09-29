@@ -14,6 +14,8 @@
  *                         [--token-file ~/.dsh/tailscale-remote.json] [--no-launch]
  *   pnpm dock-app:uninstall [--name DSH]
  *   pnpm dock-app:remote <host[/path] | URL> [--name "DSH Host"] [--glyph-color #0090FF] [--no-launch]
+ *   pnpm dock-app:local --name "DSH canary" --url http://127.0.0.1:3091/ --token-file /path/token.json [--instance canary-x] [--glyph-color #E5484D] [--no-launch]
+ *       (a wrapper for a loopback DSH whose per-launch token is read from the file on every connect — pnpm canary uses it)
  *                         a BLUE app that opens another Mac's DSH directly over the tailnet (no relay, no
  *                         fallback, no token; identity admission). Default name: DSH <Titlecased host>.
  *   … every command takes `--instance preview` to address a second (preview) DSH's relay/app.
@@ -24,7 +26,7 @@
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { REMOTE_GLYPH_COLOR, buildDockApp, dockAppStatus, installDockApp, parseRemoteTarget, remoteAppName, remoteInstance, resolveTailnetHost, uninstallDockApp } from '../dock-app.mjs'
+import { REMOTE_GLYPH_COLOR, buildDockApp, dockAppStatus, installDockApp, parseRemoteTarget, remoteAppName, remoteInstance, resolveTailnetHost, sanitizeName, uninstallDockApp } from '../dock-app.mjs'
 import { defaultLogDir, installRelayAgent, relayStatus, uninstallRelayAgent } from '../relay/launch-agent.mjs'
 import { defaultStateFile } from '../state.mjs'
 import { createTailscaleManager } from '../tailscale.mjs'
@@ -137,6 +139,24 @@ async function main() {
       console.log(JSON.stringify({ ...result, name, url }, null, 2))
       return
     }
+    case 'dock-app:local': {
+      const name = String(flags.name ?? 'DSH Local')
+      if (typeof flags.url !== 'string') throw new Error('dock-app:local needs --url http://127.0.0.1:<port>/')
+      if (typeof flags['token-file'] !== 'string') throw new Error('dock-app:local needs --token-file <json with {"token"}>')
+      const result = await installDockApp({
+        name,
+        instance: String(flags.instance ?? `local-${sanitizeName(name).toLowerCase().replace(/[^a-z0-9]+/g, '-')}`),
+        url: String(flags.url),
+        fallbackUrl: undefined,
+        tokenFile: expandHome(String(flags['token-file'])),
+        glyphColor: flags['glyph-color'] ?? '#E5484D',
+        tileColor: flags['tile-color'],
+        launch: flags.launch !== false,
+        log,
+      })
+      console.log(JSON.stringify({ ...result, name, url: flags.url }, null, 2))
+      return
+    }
     case 'dock-app:uninstall':
       console.log(JSON.stringify(await uninstallDockApp({ name: String(flags.name ?? 'DSH') }), null, 2))
       return
@@ -144,7 +164,7 @@ async function main() {
       console.log(JSON.stringify(await dockAppStatus({ name: String(flags.name ?? 'DSH'), url: typeof flags.url === 'string' ? flags.url : '' }), null, 2))
       return
     default:
-      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <host[/path]>|dock-app:uninstall|dock-app:status [flags]')
+      console.error('usage: cli.mjs relay:install|relay:uninstall|relay:status|dock-app:build|dock-app:install|dock-app:remote <host[/path]>|dock-app:local --url --token-file|dock-app:uninstall|dock-app:status [flags]')
       process.exit(2)
   }
 }

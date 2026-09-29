@@ -528,6 +528,7 @@ pnpm dock-app:build                                                   # compile 
 pnpm dock-app:install [--name DSH] [--url https://node.ts.net/dsh/] [--fallback http://127.0.0.1:3083/]
 pnpm dock-app:status | pnpm dock-app:uninstall
 pnpm dock-app:remote <host[/path] | URL> [--name "DSH Host"]             # BLUE app straight to another Mac's DSH
+pnpm dock-app:local --name N --url http://127.0.0.1:PORT/ --token-file F  # RED app for a loopback dsh web (pnpm canary)
 ```
 
 `dock-app:remote` builds a **direct-remote** app: the same wrapper, pointed at
@@ -543,6 +544,15 @@ bundle id `io.github.taliesinb.dsh-dock-app.remote-<host>-<path>` so every
 remote keeps its own WebKit cookies and can sit in the Dock next to the others.
 It skips the hybrid Remotes model entirely — no frame, just `dsh web` in a
 window.
+
+`dock-app:local` builds a **local** app: the wrapper pointed at a loopback
+`dsh web` with **no fallback**, its per-launch token read from `--token-file`
+(JSON `{"token": "…"}`) on every connect — with a `tokenFile` and no
+`fallbackUrl` the wrapper tokens the primary URL itself, so a restarted server
+with a new token reconnects on the 5 s retry or ⌘R. Glyph red `#E5484D`,
+bundle id `io.github.taliesinb.dsh-dock-app.<instance>` (`--instance`, default
+`local-<name>`). This is what `pnpm canary` (repo root) installs per branch;
+see `recipes/canary-instances.md`.
 
 The same actions are buttons in Settings → Tailscale remote → *This Mac*.
 Every script takes `--instance preview` to address the preview pair.
