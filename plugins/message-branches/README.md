@@ -26,6 +26,20 @@ the tree of branches. DSH plugin, both halves (`index.js` host routes,
   same kind of fork, so those branches appear in the tree and as versions of
   the *following* user message.
 
+## Screenshots
+
+| Editing a sent message | Versions of a message |
+|---|---|
+| ![editor](screenshots/editor.png) | ![versions](screenshots/versions.png) |
+
+| The tree (header popover) | The tree (sidebar tab) |
+|---|---|
+| ![tree popover](screenshots/tree-popover.png) | ![tree sidebar](screenshots/tree-sidebar.png) |
+
+| Editing attachments too | The branch, with the edited attachments |
+|---|---|
+| ![editor with attachments](screenshots/editor-attachments.png) | ![branch](screenshots/branch-with-attachments.png) |
+
 ## How it works
 
 A branch is a DSH fork session: `header.parentSession` names the source,
