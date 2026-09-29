@@ -1,0 +1,5 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# No config: the chords are fixed (Ctrl+S / Ctrl+S,S / Ctrl+R).
+- insert:
+    - id: tali-message-stash
+      name: tali-message-stash
