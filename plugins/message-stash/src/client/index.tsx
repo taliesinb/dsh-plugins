@@ -22,26 +22,33 @@
  *   - `StashButton` (`conversation.input.right`): the stash count beside the
  *     model picker; click opens the view. Nothing while the stash is empty.
  *   - `StashView` (`shell.overlay`): the Ctrl+S,S dialog.
+ *   - `StashSettingsRow` (`settings.general.item`): the double-tap window.
  *   - One capture-phase `keydown` listener on `window` for the chords.
  *
- * The stash lives in localStorage (one per browser profile, all sessions).
+ * The stash and the settings live in localStorage (one per browser profile,
+ * all sessions).
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { InjectFace, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { Button, Modal, Tooltip, relativeTime } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { StashController, type ViewState } from './controller.ts'
-import { chordOf, DoubleTap, focusAllows } from './keys.ts'
+import { chordOf, DOUBLE_TAP_MS, DoubleTap, focusAllows } from './keys.ts'
+import { StashSettingsRow, type SettingsRowInjected, type StashSettings } from './settings.tsx'
 import type { StashEntry, StashState } from './stash.ts'
 
 export { chordOf, DoubleTap, focusAllows } from './keys.ts'
 export * from './stash.ts'
 
 const MARKER_ATTR = 'data-tali-stash-session'
+/** Persisted settings store name (localStorage, via the client store's own persistence). */
+const SETTINGS_STORE = 'tali.message-stash.settings'
 /** Persisted drafts seed asynchronously after mount; reconcile a checkout after this. */
 const RECONCILE_MS = 500
 
@@ -380,7 +387,9 @@ export const inject = ['slots']
 export function apply(ctx: Context): void {
   const storage = typeof localStorage === 'undefined' ? undefined : localStorage
   const controller = new StashController(storage)
-  const doubleTap = new DoubleTap()
+  const settings = createSnapshotStore<StashSettings>({ doubleTapMs: DOUBLE_TAP_MS }, { persist: { name: SETTINGS_STORE } })
+  const doubleTap = new DoubleTap(settings.getSnapshot().doubleTapMs)
+  ctx.effect(() => settings.subscribe(() => { doubleTap.setWindow(settings.getSnapshot().doubleTapMs) }), 'message-stash: settings → double tap')
   const injected = (): Injected => ({ controller })
 
   const onKeyDown = (event: KeyboardEvent): void => {
@@ -444,6 +453,20 @@ export function apply(ctx: Context): void {
     ctx.slots.register(
       { name: 'shell.overlay', id: 'tali-message-stash', inject: injected },
       StashView,
+    ))
+
+  ctx.slots.inject('settings.general.item', () =>
+    ctx.slots.register(
+      {
+        name: 'settings.general.item',
+        id: 'tali-message-stash-double-tap',
+        order: 60,
+        inject: (): SettingsRowInjected => ({
+          hooks: { settings },
+          setDoubleTapMs: (ms) => { settings.set({ doubleTapMs: ms }) },
+        }),
+      },
+      StashSettingsRow,
     ))
 
   console.info('[message-stash] Ctrl+S stash · Ctrl+S,S view · Ctrl+R cycle')

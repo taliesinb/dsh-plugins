@@ -18,6 +18,7 @@ decisions, the trial procedure and what failed.
 | A per-session mount point that exists exactly for the session being typed into | `conversation.input.dock` (list, scope `session`); the watcher renders only a hidden `<span data-tali-stash-session>` marker | `contract/slots.ts` |
 | A control in the composer tool row | `conversation.input.right` (list, scope `session`) — rendered inside `.trailing` before the model picker; styled like the shell's `.add` button (28px capsule, `--dsw-specific-selector`) | `skeleton/InputBar.tsx:440` |
 | A modal | `shell.overlay` (list) + the shipped `Modal`/`Button` from `ui-primitives`, as reboot-command does | `ui-layout/src/client/AppFrame.tsx` |
+| A user setting | `settings.general.item` (list, root; typed in `@deepseek-ai/dsh-client-ui-settings`), one row after the shipped "Send behavior while busy"; state in a `createSnapshotStore(…, { persist: { name } })` bound as `useSettings` through the inject `hooks` compartment, written through an injected callback | `ui-conversation/settings/EnterBehaviorRow.tsx`, `ui-settings/src/client/contract/slots.ts` |
 | Is focus in the composer? | the editor's unhashed `data-composer-input` attribute | `input/editor/ComposerContentEditable.tsx:46` |
 
 The chord listener is one capture-phase `keydown` on `window` (same pattern
@@ -43,7 +44,8 @@ platforms (Chrome honours it for both).
 - **Ctrl+S, S opens the view *after* the first tap pushed.** A single Ctrl+S
   must act immediately (no wait for a possible second tap), so with text in
   the composer the first tap pushes and the second opens the view showing it
-  on top. The detector is a 600 ms window on `event.timeStamp`, reset by any
+  on top. The detector is a window on `event.timeStamp` (default 1 s; the
+  first 600 ms was too tight for a human double tap), reset by any
   non-modifier key.
 - **Which session?** One `conversation.input.dock` instance is mounted per
   displayed session (normally one). The controller keeps a registration per
@@ -101,7 +103,8 @@ composer. Then, driving keys and reading `localStorage['tali.message-stash.v1']`
 | `pnpm dsh …` from the checkout: `create the temporary package manager install directory — Operation not permitted` | pnpm 12's `packageManager` temp dir under the sandbox. Launch the CLI source directly: `node --import tsx/esm apps/cli/src/bin.ts --profile web --patch … --port … --no-open` (as `recipes/chat-title-plugin.md` records). |
 | "Choose workspace" does nothing visible; an `osascript … choose folder` process appears | The native picker. `pkill -f "choose folder"`, restart with `SSH_TTY=<anything>` so the in-browser picker is used (`recipes/session-title-slug-plugin.md`). |
 | `node --experimental-strip-types --test`: `TypeScript parameter property is not supported in strip-only mode` | Node 26 strips types only; no `constructor(private readonly x)` in modules the tests import — plain fields. |
-| Ctrl+S, S did not open the view when the two taps were separate tool calls | Real round trips exceed the 600 ms window; send both `keyPress` steps in one `chrome_interact` batch (400 ms settle) — or a human simply taps twice. |
+| Ctrl+S, S did not open the view when the two taps were separate tool calls | Real round trips exceed the window; send both `keyPress` steps in one `chrome_interact` batch (400 ms settle) — or a human simply taps twice. |
+| Typing after clicking the composer's placeholder text went nowhere (Chrome trial) | The click hit the placeholder overlay; click the `[role=textbox]` (snapshot uid) instead. |
 | Ctrl+A in the composer moved the caret instead of selecting | macOS emacs binding in Chrome; ⌘A selects. Irrelevant to the plugin, relevant to driving the trial. |
 | The worktree's `deepseek-harness/` submodule is empty | `git worktree add` leaves submodules unpopulated; the plugins' `link:` deps need the checkout at `../../deepseek-harness`. The sibling `message-branches` worktree symlinks it to the main checkout (`ln -s ../../deepseek-harness deepseek-harness`, an uncommitted typechange) — same here. |
 

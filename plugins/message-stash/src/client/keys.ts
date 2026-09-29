@@ -4,12 +4,15 @@
  * modifiers, no auto-repeat.
  *
  *   Ctrl+S        push the composer text onto the stash
- *   Ctrl+S, S     a second Ctrl+S within `DOUBLE_TAP_MS` opens the stash view
+ *   Ctrl+S, S     a second Ctrl+S within the double-tap window opens the stash view
  *   Ctrl+R        cycle: next stashed message into the composer
  */
 
-/** Two Ctrl+S taps closer than this open the stash view. */
-export const DOUBLE_TAP_MS = 600
+/** Default double-tap window; Settings → General overrides it (0 = off). */
+export const DOUBLE_TAP_MS = 1000
+
+/** The choices offered in Settings, in ms; 0 disables the double tap. */
+export const DOUBLE_TAP_CHOICES = [300, 500, 750, 1000, 1500, 2000, 0] as const
 
 export type Chord = 'stash' | 'cycle'
 
@@ -30,17 +33,24 @@ export function chordOf(event: KeyboardEvent): Chord | undefined {
  * Double-tap detector for Ctrl+S: `tap(now)` returns true on the second of
  * two taps within the window (and resets, so a third tap starts over).
  * `interrupt()` is called for any other key so "Ctrl+S, type, Ctrl+S" is two
- * single taps.
+ * single taps. The window can change at any time (Settings); 0 or less
+ * disables the double tap.
  */
 export class DoubleTap {
   private last: number | undefined
-  private readonly windowMs: number
+  private windowMs: number
 
   constructor(windowMs = DOUBLE_TAP_MS) {
     this.windowMs = windowMs
   }
 
+  setWindow(ms: number): void {
+    this.windowMs = ms
+    this.last = undefined
+  }
+
   tap(now: number): boolean {
+    if (this.windowMs <= 0) return false
     const double = this.last !== undefined && now - this.last <= this.windowMs
     this.last = double ? undefined : now
     return double

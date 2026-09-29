@@ -7,7 +7,7 @@ shared by every session of that browser profile.
 | Chord | What happens |
 |---|---|
 | **Ctrl+S** | Push the composer text onto the stash; the composer clears. |
-| **Ctrl+S, S** | (a second Ctrl+S within 600 ms) Open the stash view. |
+| **Ctrl+S, S** | (a second Ctrl+S within the double-tap window, default 1 s) Open the stash view. |
 | **Ctrl+R** | Cycle: the top stashed message replaces the composer text; whatever was in the composer goes to the bottom of the stash. Repeated Ctrl+R walks the whole stash as a ring. |
 
 Literal Ctrl on every platform (⌘S / ⌘R stay the browser's). The chords act
@@ -43,6 +43,13 @@ stash; **Escape** closes.
 A count button appears in the composer tool row (left of the model picker)
 while the stash is non-empty; clicking it opens the view.
 
+## Settings
+
+**Settings → General → "Stash view on Ctrl+S, S within"**: the double-tap
+window — 300 ms, 500 ms, 750 ms, 1 s (default), 1.5 s, 2 s, or Off (the
+view then opens only from the count button). Per browser profile, persisted
+in localStorage (`tali.message-stash.settings`), applied immediately.
+
 ## What is stashed
 
 The composer's clipboard projection: plain text with reference chips in
@@ -57,12 +64,15 @@ their clipboard form. Attachments are not stashed and stay in the composer.
   focus rule. `test/keys.test.ts`.
 - `src/client/controller.ts` — persistence, the per-session composer
   registrations, the "was it sent?" observation, the view's open state.
+- `src/client/settings.tsx` — the Settings → General row over a persisted
+  `createSnapshotStore`.
 - `src/client/index.tsx` — the Cordis `apply`: one capture-phase `keydown`
   listener on `window`; a hidden per-session watcher in
   `conversation.input.dock` (reports the live draft, the input phase and
   every local submission echo — `pendingSubmissions` — which is how a send is
   detected, since a send clears the draft synchronously); the count button in
-  `conversation.input.right`; the view in `shell.overlay`.
+  `conversation.input.right`; the view in `shell.overlay`; the settings row
+  in `settings.general.item`.
 - `index.js` — host half; empty `apply` (the package must exist on the Node
   side for the Loader row to resolve and the bundle to be served).
 
