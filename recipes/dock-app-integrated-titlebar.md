@@ -107,6 +107,58 @@ skips the tailscale lookup). Other wrappers built from the same source
 | Judging the glass from a snapshot | impossible: single-window captures render vibrancy as a flat fill |
 | `NSToolbar` with `.unified` style to get a 52px bar "for free" | not tried — an empty toolbar view sits above the content and would take the clicks the page needs |
 
+## Native drag regions (2026-09-29): "sometimes it grabs, sometimes it selects text"
+
+The first drag bridge (page `mousedown` → `postMessage` → `performDrag(with:
+NSApp.currentEvent)`) was fickle by construction: the message crosses from
+the WebContent process *after* WebKit has already started a text selection,
+and by then `NSApp.currentEvent` is often no longer the press, so the guard
+failed and the click merely selected header text. Worse, only elements
+carrying the `_topStrip` / `_titleRow` classes counted — the title row is a
+30px strip inside a 76px header, so the header's padding was undraggable, and
+the session title is a `<button>` (the session picker's crumb), so the one
+thing everybody grabs was excluded as a control.
+
+Replaced by the Chromium/Electron model, `DockWebView` (a `WKWebView`
+subclass) + the bridge script:
+
+- **The page reports a hit-tested map of the top 52 CSS px**: every 6px
+  column of each 8px strip is probed with `elementFromPoint`; a point is
+  draggable unless it lands on a *hard control* — `button[aria-label]`
+  (icon buttons: sidebar toggles, QR, ⋯, right sidebar), buttons under
+  `_headerActions` / `_headerUtilities` / `_headerCorner` (background jobs),
+  tabs, inputs, menus/popups, the sidebar resize handle (`_handle`, any
+  `resize`/`grab` cursor). Text, padding, the wordmark, the title crumb and
+  the mode chip are draggable. Re-reported ≤ 10/s on mutations, resize,
+  scroll, transition/animation end (coalesced; trailing 250ms).
+- **`DockWebView.mouseDown` consumes a press inside the map before WebKit
+  sees it** and tracks it with `window.nextEvent(matching:)`: ≥ 3pt of
+  movement → `window.performDrag(with: press)`; release without movement →
+  `super.mouseDown` + `super.mouseUp` replayed, so a click on the title still
+  opens its picker. Double-click → the Desktop & Dock title-bar action.
+- The old JS path stays as a fallback for a one-frame-stale map, now with
+  `preventDefault()` so no selection can start; the title regions are also
+  `user-select: none`.
+
+Measured facts along the way:
+
+- `WKWebView` on macOS is `isFlipped == true` with one `WKFlippedView` child
+  that handles no events — overriding `mouseDown` on the subclass is
+  sufficient. CSS px = view points ÷ `pageZoom`; with `magnification != 1`
+  the mapping is skipped (falls through to WebKit).
+- **CGEvent mouse events posted to the pid never reach a view** (keyboard
+  events do — the `ax-drive` chords): AppKit drops mouse events without a
+  window, and tagging `mouseEventWindowUnderMousePointer` does not help. So
+  the wrapper has a headless **test hook**: launched with `DSH_DOCK_TEST=1`
+  (run the executable directly; `open` cannot pass env), it listens for the
+  distributed notification `io.github.taliesinb.dsh-dock-app.test-event`
+  `{ x, y, clicks, kind: down|up }` (points from the window's top-left) and
+  dispatches a real `NSEvent` through `window.sendEvent`; a drag decision is
+  logged as `native drag at x,y` instead of performed (a synthetic press
+  cannot drive a window-server drag). Verified the map and the double-click
+  path that way; the drag itself was verified by hand — ask the maintainer
+  to drag, it is faster than any probe.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
