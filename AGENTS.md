@@ -535,7 +535,7 @@ can reproduce or maintain it:
   with the `lsof` uid guard + `PortForward.swift`; the `NWListener` EINVAL
   and multi-file `swiftc` traps; what is still unmeasured).
 - `install-rewind-plugin.md` — session rewind plugin install.
-- `message-stash-plugin.md` — a git-stash for composer messages
+- `message-stash-plugin.md` — a stash for unsent composer messages
   (`message-stash` plugin, browser half only): Ctrl+S pushes the draft,
   Ctrl+S,S opens the stash view, Ctrl+R cycles stashed messages through the
   composer as a ring; a cycled message is *checked out* and popped only when

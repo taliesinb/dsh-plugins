@@ -1,8 +1,13 @@
 # tali-message-stash
 
-A `git stash` for messages you are writing in the DSH web GUI composer.
-Browser half only; the stash lives in the browser's localStorage and is
-shared by every session of that browser profile.
+A stash for messages you are writing in the DSH web GUI composer: set a
+draft aside with one key, bring it back with another. Nothing to do with git.
+Browser half only.
+
+**Where it lives.** In the browser's localStorage, so it survives restarts of
+the DSH server and of the app/browser. It is per browser profile and origin:
+the Dock app, Chrome, the phone (tailnet URL) and a canary instance each have
+their own stash, shared by every session shown there.
 
 | Chord | What happens |
 |---|---|

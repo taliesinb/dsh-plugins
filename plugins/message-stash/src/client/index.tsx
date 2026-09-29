@@ -1,7 +1,7 @@
 /**
  * tali-message-stash — browser half.
  *
- * A git-stash for composer messages:
+ * A stash for unsent composer messages (set a draft aside, bring it back):
  *
  *   Ctrl+S      push the composer text onto the stash (composer clears)
  *   Ctrl+S, S   open the stash view (list, restore, delete, clear)

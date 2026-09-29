@@ -2,7 +2,7 @@
   "name": "tali-message-stash",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH client plugin: a git-stash for composer messages. Ctrl+S pushes the draft onto the stash, Ctrl+S,S opens the stash view, Ctrl+R cycles stashed messages through the composer; a cycled message is popped only when it is sent.",
+  "description": "DSH client plugin: a stash for unsent composer messages. Ctrl+S pushes the draft onto the stash, Ctrl+S,S opens the stash view, Ctrl+R cycles stashed messages through the composer; a cycled message is popped only when it is sent.",
   "type": "module",
   "main": "index.js",
   "exports": {

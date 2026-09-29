@@ -1,7 +1,8 @@
 # A stash for composer messages (`message-stash` plugin)
 
-2026-09-29. `plugins/message-stash` — a git-stash for the text in the web
-GUI composer: **Ctrl+S** pushes the draft, **Ctrl+S, S** opens the stash
+2026-09-29. `plugins/message-stash` — a stash for unsent text in the web
+GUI composer (the git word was dropped from the naming: nothing here touches
+git; "push/pop" are the stack's own words): **Ctrl+S** pushes the draft, **Ctrl+S, S** opens the stash
 view, **Ctrl+R** cycles stashed messages through the composer, and a cycled
 message is popped only when it is actually sent. Browser half only, no
 config, stash in localStorage. The plugin README owns the behaviour and the
