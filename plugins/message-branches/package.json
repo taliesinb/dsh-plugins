@@ -1,0 +1,60 @@
+{
+  "name": "tali-message-branches",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin: edit a sent user message (text and attachments) into a new branch of the conversation, step between the versions of an edited message, and navigate the whole tree of branches (header popover + right-sidebar tab). Branches are DSH fork sessions, so the shipped Branch button lands in the same tree.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "tree.mjs",
+    "shared/branches.mjs",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit",
+    "check": "node --check index.js && node --check tree.mjs && node --check shared/branches.mjs && node --test tests/*.test.mjs",
+    "prepare": "node build.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-llm": "link:../../deepseek-harness/packages/llm/llm",
+    "@deepseek-ai/schemastery": "link:../../deepseek-harness/vendor/schemastery"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-api-session-controller": "link:../../deepseek-harness/packages/api/session-controller",
+    "@deepseek-ai/dsh-attachment": "link:../../deepseek-harness/packages/attachment/attachment",
+    "@deepseek-ai/dsh-client-file-upload": "link:../../deepseek-harness/packages/client/file-upload",
+    "@deepseek-ai/dsh-client-store": "link:../../deepseek-harness/packages/client/store",
+    "@deepseek-ai/dsh-client-ui-chat": "link:../../deepseek-harness/packages/client/ui-chat",
+    "@deepseek-ai/dsh-client-ui-conversation": "link:../../deepseek-harness/packages/client/ui-conversation",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer",
+    "@deepseek-ai/dsh-client-ui-session": "link:../../deepseek-harness/packages/client/ui-session",
+    "@deepseek-ai/dsh-client-ui-sidebar-right": "link:../../deepseek-harness/packages/client/ui-sidebar-right",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@deepseek-ai/dsh-client-ui-workspace": "link:../../deepseek-harness/packages/client/ui-workspace",
+    "@deepseek-ai/dsh-session": "link:../../deepseek-harness/packages/core/session",
+    "@types/react": "~18.3.1",
+    "@types/react-dom": "~18.3.7",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2"
+  }
+}

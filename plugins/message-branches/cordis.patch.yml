@@ -1,0 +1,7 @@
+# Bundle patch (used when installed with `dsh plugin --profile <name> add`).
+# Edit sent user messages into branches, step between versions, navigate the
+# tree. Override `config` in the profile's cordis.patch.yml (a later layer
+# replaces the whole value).
+- insert:
+    - id: tali-message-branches
+      name: tali-message-branches
