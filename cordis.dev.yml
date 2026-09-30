@@ -121,3 +121,10 @@
     # writes a complete preview-home ZIP under ~/.dsh-preview-backups.
     - id: tali-backup-restore
       name: '/Users/USER/github/tali-dash-plugins/plugins/backup-restore/index.js'
+    # Under trial (2026-09-29): message-branches — Edit on every user bubble
+    # (text + attachments) forking the session before that turn, a ‹ i/n ›
+    # version switcher with a versions list, and the branch tree (header
+    # popover + right-sidebar tab). Both halves; the host half needs a
+    # restart. Recipe: recipes/message-branches-plugin.md
+    - id: tali-message-branches
+      name: '/Users/USER/github/tali-dash-plugins/plugins/message-branches/index.js'

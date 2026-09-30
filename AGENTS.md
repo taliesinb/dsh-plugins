@@ -564,6 +564,23 @@ can reproduce or maintain it:
   in `browser-automation` (and its twin in an extras plugin), and the
   `repair-session-string-content.mjs` log-repair tool (zstd multi-frame and
   packed-chunk-row traps).
+- `message-branches-plugin.md` — editing a sent user message into a branch
+  (`message-branches` plugin, both halves): the survey (fork exists but only
+  as the assistant-side Branch icon; no edit, no versions, no tree; the
+  append-only log's `replace` cannot be switched back, so branches are fork
+  sessions and the shipped Branch lands in the same tree), why the plugin
+  forks by itself (the gateway fork refuses a cut before turn 1; cold-store
+  through `sessionPersistence` + resume through `sessionController` so the
+  model selection and retention are the controller's), the inbox-splice cut
+  rule, why kept attachments must be copied host-side (the prompt wire is
+  base64/receipt only) and new files ride the shipped `fileUpload` service
+  against the source session; the version rule over headers + cuts
+  (`shared/branches.mjs`), the replacement `user` chat cell at priority −10
+  with a ported stylesheet, the ‹ i/n › switcher + versions list, the tree in
+  a header popover and a `branches` sidebar tab, `<title> (n)` numbering;
+  the throwaway-home Chrome trial (turn-3 edit, native Branch as a sibling,
+  first-message edit keeping/dropping/adding image + file) and the failure
+  table.
 - `instance-identity.md` — telling the DSH / DSH Preview / DSH Remote windows
   apart (`instance-identity` plugin, host-only, plus the Dock-app wrapper):
   a `webserver/index-inject` `<style>` row renames the wordmark via
