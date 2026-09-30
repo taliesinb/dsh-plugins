@@ -535,6 +535,19 @@ can reproduce or maintain it:
   with the `lsof` uid guard + `PortForward.swift`; the `NWListener` EINVAL
   and multi-file `swiftc` traps; what is still unmeasured).
 - `install-rewind-plugin.md` — session rewind plugin install.
+- `message-stash-plugin.md` — a stash for unsent composer messages
+  (`message-stash` plugin, browser half only): Ctrl+S pushes the draft,
+  Ctrl+S,S opens the stash view, Ctrl+R cycles stashed messages through the
+  composer as a ring; a cycled message is *checked out* and popped only when
+  its session's `pendingSubmissions` echo shows it was sent (edits written
+  back on Ctrl+R/Ctrl+S; clearing by hand releases it) — the `seenText` /
+  grace-window guards around the draft's transient blanks; the seams
+  (`useInput.draft`, `inputActions.setDraft`, `conversation.input.dock` /
+  `.input.right` / `shell.overlay`, `data-composer-input`), localStorage
+  persistence, the throwaway-home trial driven from Chrome, and the traps
+  (pnpm-12 temp dir → `node --import tsx/esm apps/cli/src/bin.ts`, `SSH_TTY`
+  for the in-browser picker, strip-only TypeScript, worktree submodule
+  symlink).
 - `model-titles-not-slugs-on-new-instance.md` — model-generated session
   titles come out as natural phrases instead of `foo-bar-baz` on a freshly
   bootstrapped instance (DSH Remote, 2026-09-22): the slug shape is the fork's

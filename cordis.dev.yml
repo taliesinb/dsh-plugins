@@ -121,3 +121,11 @@
     # writes a complete preview-home ZIP under ~/.dsh-preview-backups.
     - id: tali-backup-restore
       name: '/Users/USER/github/tali-dash-plugins/plugins/backup-restore/index.js'
+    # Under trial (2026-09-29): message-stash — a stash for unsent composer
+    # messages: Ctrl+S pushes the draft, Ctrl+S,S opens the stash view, Ctrl+R
+    # cycles stashed messages through the composer (an entry is popped only
+    # when it is actually sent; edits made while cycling are written back).
+    # Browser half only; the stash lives in localStorage. Recipe:
+    # recipes/message-stash-plugin.md
+    - id: tali-message-stash
+      name: '/Users/USER/github/tali-dash-plugins/plugins/message-stash/index.js'

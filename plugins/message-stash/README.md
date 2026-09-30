@@ -1,0 +1,102 @@
+# tali-message-stash
+
+A stash for messages you are writing in the DSH web GUI composer: set a
+draft aside with one key, bring it back with another. Nothing to do with git.
+Browser half only.
+
+**Where it lives.** In the browser's localStorage, so it survives restarts of
+the DSH server and of the app/browser. It is per browser profile and origin:
+the Dock app, Chrome, the phone (tailnet URL) and a canary instance each have
+their own stash, shared by every session shown there.
+
+| Chord | What happens |
+|---|---|
+| **Ctrl+S** | Push the composer text onto the stash; the composer clears. |
+| **Ctrl+S, S** | (a second Ctrl+S within the double-tap window, default 1 s) Open the stash view. |
+| **Ctrl+R** | Cycle: the top stashed message replaces the composer text; whatever was in the composer goes to the bottom of the stash. Repeated Ctrl+R walks the whole stash as a ring. |
+
+Literal Ctrl on every platform (⌘S / ⌘R stay the browser's). The chords act
+from the composer and from anywhere that is not a text field; another input,
+textarea or editable region keeps its own Ctrl+S / Ctrl+R.
+
+## Pop only on send
+
+A message brought into the composer by Ctrl+R (or by **Restore** in the view)
+is *checked out*: it stays in the stash until it is actually sent.
+
+- **Send it** (edited or not) → it is popped.
+- **Ctrl+R again** → your edits are written back into that entry, it moves to
+  the bottom, and the next entry comes up.
+- **Ctrl+S** → the entry is updated with your edits and moved to the top; the
+  composer clears.
+- **Clear the composer by hand** → the checkout ends; the entry stays as it
+  was.
+
+Ctrl+R with unstashed text in the composer parks that text at the bottom of
+the stash before bringing the top entry in, so nothing typed is ever lost.
+Ctrl+R on an empty stash does nothing.
+
+## The view (Ctrl+S, S)
+
+Newest first. Each row: the text (clipped to four lines), how long ago it was
+stashed or last edited, the session it came from, and "in composer" for the
+checked-out entry. Hover or ↑/↓ selects; **Enter** or a click restores the
+entry into the composer of the session the view was opened from; **⌫ /
+Delete** or the row's × deletes it; **Clear** (pressed twice) empties the
+stash; **Escape** closes.
+
+A count button appears in the composer tool row (left of the model picker)
+while the stash is non-empty; clicking it opens the view.
+
+## Settings
+
+**Settings → General → "Stash view on Ctrl+S, S within"**: the double-tap
+window — 300 ms, 500 ms, 750 ms, 1 s (default), 1.5 s, 2 s, or Off (the
+view then opens only from the count button). Per browser profile, persisted
+in localStorage (`tali.message-stash.settings`), applied immediately.
+
+## What is stashed
+
+The composer's clipboard projection: plain text with reference chips in
+their clipboard form. Attachments are not stashed and stay in the composer.
+
+## Layout
+
+- `src/client/stash.ts` — the pure model (ordered entries + one checkout;
+  `push`, `cycle`, `restore`, `pop`, `release`; the localStorage codec).
+  Unit-tested in `test/stash.test.ts`.
+- `src/client/keys.ts` — chord recognition, the double-tap detector, the
+  focus rule. `test/keys.test.ts`.
+- `src/client/controller.ts` — persistence, the per-session composer
+  registrations, the "was it sent?" observation, the view's open state.
+- `src/client/settings.tsx` — the Settings → General row over a persisted
+  `createSnapshotStore`.
+- `src/client/index.tsx` — the Cordis `apply`: one capture-phase `keydown`
+  listener on `window`; a hidden per-session watcher in
+  `conversation.input.dock` (reports the live draft, the input phase and
+  every local submission echo — `pendingSubmissions` — which is how a send is
+  detected, since a send clears the draft synchronously); the count button in
+  `conversation.input.right`; the view in `shell.overlay`; the settings row
+  in `settings.general.item`.
+- `index.js` — host half; empty `apply` (the package must exist on the Node
+  side for the Loader row to resolve and the bundle to be served).
+
+## Develop
+
+```sh
+pnpm install --ignore-scripts   # --ignore-scripts: prepare would rebuild lib/client.js (hot-swaps a GUI that serves it)
+pnpm test                       # node --test over the pure modules
+pnpm typecheck
+pnpm build                      # lib/client.js; `pnpm watch` rebuilds on save
+```
+
+Trial: the `tali-message-stash` row in `cordis.dev.yml` (preview server), or
+a throwaway home — see `recipes/message-stash-plugin.md`.
+
+## Install (live profile)
+
+```sh
+dsh plugin --profile web add ./plugins/message-stash
+```
+
+No config.
