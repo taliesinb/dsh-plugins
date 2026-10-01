@@ -67,6 +67,10 @@
 //   { "name": "DSH", "url": "https://node.ts.net/dsh/",
 //     "fallbackUrl": "http://127.0.0.1:3083/", "tokenFile": "/Users/me/.dsh/tailscale-remote.json",
 //     "glyphColor": "#0090FF" }   // icon glyph colour; absent or #000000 = stock whale in the page
+// `tokenFile` (JSON `{"token": "..."}`) is read on every connect. With a
+// `fallbackUrl` it tokens that loopback fallback (the relay's standing token);
+// WITHOUT one it tokens `url` itself — a purely local wrapper such as a
+// `pnpm canary` instance, whose per-launch token the canary tool writes there.
 //
 // Built by dock-app/build.mjs with swiftc (Command Line Tools suffice; no Xcode).
 
@@ -79,6 +83,10 @@ struct DockConfig: Decodable {
     var fallbackUrl: String?
     var tokenFile: String?
     var glyphColor: String?
+    /// Present in the bundled app (DSH.dmg): run the server from Contents/Resources (EmbeddedServer.swift).
+    var embedded: EmbeddedSpec?
+    /// Present in the bundled app: check GitHub Releases for newer builds (Updater.swift).
+    var update: UpdateSpec?
 
     /// Product title the shipped client uses for the wordmark and `document.title`.
     static let genericProductTitle = "DSH Local Build"
@@ -101,7 +109,7 @@ struct DockConfig: Decodable {
            let config = try? JSONDecoder().decode(DockConfig.self, from: data) {
             return config
         }
-        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil)
+        return DockConfig(name: "DSH", url: "http://127.0.0.1:3080/", fallbackUrl: nil, tokenFile: nil, glyphColor: nil, embedded: nil, update: nil)
     }
 }
 
@@ -215,8 +223,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     var showingOfflinePage = false
     var retryTimer: Timer?
     var connecting = false
+    /// Embedded mode (bundled app): the server this process runs, and the tokened URL it announced.
+    var embedded: EmbeddedServer?
+    var embeddedURL: URL?
+    var embeddedRestarts = 0
+    var updater: Updater?
 
-    var remoteURL: URL { URL(string: config.url)! }
+    /// Entry point: the announced embedded URL, else the configured one (a placeholder in embedded mode until the server speaks).
+    var remoteURL: URL { embeddedURL ?? URL(string: config.url)! }
     var fallbackBase: URL? { config.fallbackUrl.flatMap(URL.init(string:)) }
 
     // MARK: lifecycle
@@ -224,6 +238,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         installSnapshotSignal()
+        installTerminateSignal()
         scope = Scope(urls: [remoteURL] + (fallbackBase.map { [$0] } ?? []))
         forwarder = PortForwarder(endpointBase: { [weak self] in self?.currentMountBase() }, log: { [weak self] line in self?.appendLog(line) })
         buildMenu()
@@ -284,7 +299,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
 
-        connect()
+        if let spec = config.embedded {
+            startEmbedded(spec)
+        } else {
+            connect()
+        }
+        if let spec = config.update {
+            let updater = Updater(spec: spec, appName: config.name, log: { [weak self] line in self?.appendLog(line) })
+            updater.schedule()
+            self.updater = updater
+        }
+    }
+
+    @objc func checkForUpdates() { updater?.checkNow() }
+
+    /// AppKit asks before showing the menu: the update item is live only with a feed configured.
+    @objc func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        if item.action == #selector(checkForUpdates) { return updater != nil }
+        return true
+    }
+
+    // MARK: embedded server
+
+    func startEmbedded(_ spec: EmbeddedSpec) {
+        let server = EmbeddedServer(spec: spec, resources: Bundle.main.resourceURL!, log: { [weak self] line in self?.appendLog(line) })
+        server.onReady = { [weak self] url in
+            guard let self else { return }
+            self.embeddedURL = url
+            self.embeddedRestarts = 0
+            // The scope was built from the placeholder URL; the real port may differ (`--port 0`).
+            self.scope = Scope(urls: [url])
+            self.showingOfflinePage = false
+            self.webView.load(URLRequest(url: url))
+        }
+        server.onExit = { [weak self] status, tail in
+            guard let self else { return }
+            self.embeddedURL = nil
+            let detail = tail.isEmpty ? "" : " Last output: " + tail.suffix(4).joined(separator: " | ")
+            self.showOffline(title: "DSH server exited", reason: "Status \(status). Log: \(self.embedded?.logFile.path ?? "")." + detail, url: self.embedded?.logFile, autoRetry: false)
+        }
+        embedded = server
+        showingOfflinePage = true
+        webView.loadHTMLString("<!doctype html><html><head><meta charset=utf-8><style>:root{color-scheme:light dark}body{margin:0;min-height:100vh;display:grid;place-items:center;font:15px -apple-system,system-ui;color:#888}</style></head><body>Starting DSH…</body></html>", baseURL: nil)
+        server.start()
     }
 
     /// All document-start scripts, in order. Re-run (after `removeAllUserScripts`)
@@ -475,6 +532,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     // MARK: window snapshot (View ▸ Save Window Snapshot, or `kill -USR1 <pid>`)
 
     private var snapshotSignal: DispatchSourceSignal?
+    private var terminateSignal: DispatchSourceSignal?
+
+    /// `kill <pid>` (SIGTERM) quits like ⌘Q so applicationWillTerminate runs and
+    /// an embedded server is stopped with the window instead of being orphaned.
+    func installTerminateSignal() {
+        signal(SIGTERM, SIG_IGN)
+        let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        source.setEventHandler { NSApp.terminate(nil) }
+        source.resume()
+        terminateSignal = source
+    }
 
     /// `kill -USR1 <pid>` saves a PNG of the window — the way an agent without
     /// Screen Recording or Accessibility permission sees what the wrapper
@@ -599,7 +667,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
-    func applicationWillTerminate(_ notification: Notification) { forwarder.closeAll() }
+    func applicationWillTerminate(_ notification: Notification) {
+        forwarder.closeAll()
+        embedded?.stop()
+    }
 
     /// The DSH mount the page is loaded from right now (tailnet or loopback fallback), or nil while offline.
     func currentMountBase() -> URL? {
@@ -632,27 +703,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         }.resume()
     }
 
-    func fallbackURL() -> URL? {
-        guard let base = fallbackBase else { return nil }
+    /// The token in `tokenFile` right now, or nil when the file is absent or has none.
+    func currentToken() -> String? {
         guard let file = config.tokenFile, let data = FileManager.default.contents(atPath: file),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = json["token"] as? String, !token.isEmpty else { return nil }
+        return token
+    }
+
+    func tokened(_ base: URL, token: String) -> URL {
         var components = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         components.path = "/"
         components.queryItems = [URLQueryItem(name: "token", value: token)]
-        return components.url
+        return components.url!
+    }
+
+    func fallbackURL() -> URL? {
+        guard let base = fallbackBase, let token = currentToken() else { return nil }
+        return tokened(base, token: token)
+    }
+
+    /// What to load once `url` answers: itself, or — local wrapper, no fallback — itself with the file's token.
+    func entryURL() -> URL {
+        guard fallbackBase == nil, let token = currentToken() else { return remoteURL }
+        return tokened(remoteURL, token: token)
     }
 
     @objc func connect() {
         if connecting { return }
-        connecting = true
         retryTimer?.invalidate()
+        if let server = embedded {
+            // Embedded: a retry restarts the server when it is down; while it runs, its announcement drives the load.
+            if server.process?.isRunning != true {
+                embeddedRestarts += 1
+                appendLog("embedded: restart #\(embeddedRestarts) requested")
+                server.start()
+            } else if let url = embeddedURL {
+                showingOfflinePage = false
+                webView.load(URLRequest(url: url))
+            }
+            return
+        }
+        connecting = true
         probe(remoteURL) { [weak self] reachable in
             guard let self else { return }
             self.connecting = false
             if reachable {
                 self.showingOfflinePage = false
-                self.webView.load(URLRequest(url: self.remoteURL))
+                self.webView.load(URLRequest(url: self.entryURL()))
                 return
             }
             if let fallback = self.fallbackURL() {
@@ -665,6 +763,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
                         self.showOffline(reason: "Neither the tailnet address nor the local relay answers. Is Tailscale connected? Is the relay LaunchAgent loaded?")
                     }
                 }
+            } else if self.config.tokenFile != nil {
+                self.showOffline(reason: "The local DSH does not answer. Start it (for a canary: pnpm canary); this window retries by itself.")
             } else {
                 self.showOffline(reason: "The tailnet address does not answer and no local fallback is configured. Is Tailscale connected?")
             }
@@ -701,7 +801,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private lazy var logURL: URL = {
         let dir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/DSH Dock", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("\(config.name).log")
+        // The bundled app logs beside, not into, a checkout-installed wrapper of the same name.
+        return dir.appendingPathComponent(config.embedded == nil ? "\(config.name).log" : "\(config.name) (bundled).log")
     }()
     private let logStamp: DateFormatter = { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f }()
     func appendLog(_ line: String) {
@@ -1071,8 +1172,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     @objc func showAbout() {
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: config.name,
-            .credits: NSAttributedString(string: "Thin WKWebView wrapper for the DSH Web GUI.\n\(config.url)"),
+            .credits: NSAttributedString(string: config.embedded == nil
+                ? "Thin WKWebView wrapper for the DSH Web GUI.\n\(config.url)"
+                : "Self-contained DSH: \(releaseSummary())"),
         ])
+    }
+
+    /// `dsh-app-release.json` written by build-app.mjs, as one line for the About panel.
+    func releaseSummary() -> String {
+        guard let url = Bundle.main.url(forResource: "dsh-app-release", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return "(no release manifest)" }
+        let plugins = (json["plugins"] as? [[String: Any]])?.count ?? 0
+        return "build \(json["build"] ?? "?") · dsh \(json["dsh"] ?? "?") · node \(json["node"] ?? "?") · \(plugins) plugins"
     }
 
     func buildMenu() {
@@ -1082,6 +1194,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         main.addItem(appItem)
         let app = NSMenu()
         app.addItem(withTitle: "About \(config.name)", action: #selector(showAbout), keyEquivalent: "")
+        // Bundled app: always list the item so the feature is discoverable; a build
+        // without an update feed (a `pnpm canary --app` build) shows it disabled.
+        if config.embedded != nil || config.update != nil {
+            let item = app.addItem(withTitle: config.update != nil ? "Check for Updates…" : "Check for Updates… (off in this build)", action: #selector(checkForUpdates), keyEquivalent: "u")
+            item.keyEquivalentModifierMask = [.command, .shift]
+            item.target = self   // enabled state comes from validateMenuItem below
+        }
         app.addItem(.separator())
         // The standard macOS chord. Safari cannot give ⌘, to a page (it is Safari's own Settings…);
         // here the menu bar is ours, so it drives the GUI's Settings panel instead.

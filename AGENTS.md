@@ -280,7 +280,11 @@ and none should be added, so a preview session can smoke-test UI/plugin
 behaviour but cannot run a real agent turn; test tool-using plugins headlessly
 or in a throwaway home with forwarded credentials (PREVIEWING.md).
 Full procedure, the ad-hoc `/tmp`-home alternative, credential forwarding and
-HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
+HMR gotchas: [PREVIEWING.md](PREVIEWING.md). **To try a feature branch as a
+user, run `pnpm canary` from its worktree** — a separate instance with its own
+red-whale Dock app `DSH <branch> <commit>` and the branch's plugins; `pnpm
+canary --app` does the same with the self-contained bundled app instead
+(`recipes/canary-instances.md`).
 
 ### Verifying a client change without a GUI login
 
@@ -418,6 +422,38 @@ can reproduce or maintain it:
   Then the row `config` was retired: a brand is only ever a profile
   (`cli.mjs import <dir|zip> --name X --apply` for provisioning; none active
   = shipped look).
+- `bundled-app-dmg.md` — the self-hosting `DSH.app` in a DMG — plain name and
+  black whale for the release, red `DSH <branch> <commit>` for canaries; the
+  full colleague flow from a pristine macOS 26 VM, screenshot by screenshot,
+  in `docs/bundled-app/README.md` (2026-09-23 → 29): why not `bootstrap-mac.sh`'s global installs and why the
+  Swift wrapper rather than upstream's Electron shell; `pnpm build-app`
+  (`tools/bundle/`: sha256-verified Node 24 LTS, `stage-dsh.mjs` packing all
+  304 fork packages + the plugins of `plugins.txt` and installing with
+  pnpm-workspace.yaml overrides, `build-app.mjs` pruning 455 MB — declarations,
+  maps, `.ts` sources, other-platform prebuilds, the 259 MB LibreOffice engine
+  unless `--with-office` — then signing ad-hoc and running hdiutil: 268 MB app,
+  88 MB DMG); `EmbeddedServer.swift` (profile `app` created/
+  merged from the bundled template, `zsh -lc` spawn, token URL from stdout,
+  SIGTERM → quit) and the `app-lifeline` plugin against orphaned servers; the
+  traps — `pnpm deploy` drops `workspace:^` peers, pnpm 12 ignores
+  `pnpm.overrides` and silently pulls UPSTREAM's npm packages, `allowBuilds`
+  keys in `@file:` form, symlinked `/tmp`, app-boot's dependency-graph BFS from
+  `@deepseek-ai/dsh/package.json` (plugins anchored there), two plugins'
+  incomplete `files`, hdiutil under the sandbox; sizes. **Updates**:
+  `pnpm release-app` (`release.mjs`: `YYYYMMDDnn` build number →
+  `CFBundleVersion`, calver display version, `gh release create canary-N`
+  with the DMG + `.sha256`, `--latest`) and `Updater.swift` (GitHub
+  `releases/latest` on launch + 6-hourly + Check for Updates…, prompt with
+  notes, download → SHA-256 → hdiutil → `cp -R` beside the bundle → Trash →
+  rename → relaunch after the old pid exits; translocation/unwritable
+  preflight; `dsh.update.autoInstall` default for headless tests; measured
+  with a local fake feed). **First run** (2026-09-29, `app-setup` plugin):
+  companion-apps checklist after the shipped onboarding (waits on
+  `#root.inert`), Get…/Open buttons, the bundle's Plugins card; why no
+  bundled plugin's card showed (the Plugins page lists only profile
+  `dependencies` → the template now lists them by version), and the
+  template merge reconciling *dropped* bundles (`dsh.app.templateBundles`)
+  after a moved plugin bricked the existing `profiles/app`.
 - `browser-automation-plugin.md` — per-chat Safari Technology Preview /
   Chrome windows and the isolated page reader (`browser-automation` plugin):
   why a plugin and not MCP config, the STP `--mcp` facts that shape it, the
@@ -435,6 +471,20 @@ can reproduce or maintain it:
   `tool.call.images`, own `<img>` via `loadImage`), effective at the next
   restart; the pnpm store v10→v11 purge, and the throwaway-home + copied
   session/attachment method for seeing a real recorded row.
+- `canary-instances.md` — `pnpm canary` (`tools/canary.sh`): one throwaway
+  `dsh web` per branch plus a Dock app `DSH <branch> <commit>` (red whale;
+  the tailscale-remote wrapper via the new `dock-app:local`, token read from
+  `token.json` on every connect — the `entryURL()` wrapper change), an
+  `instance-identity` row with the same label, the plugins changed on the
+  branch vs `origin/main` (+ `--plugin`; `INFRA_PLUGINS` skipped),
+  credentials copied in, home under `/tmp/dsh-canary/<branch>/`,
+  `stop|remove|list|logs|url`; why not `pnpm dsh` (pnpm-12 temp dir), not
+  the standing preview, not the DMG; `--app` (2026-09-29): the bundled app
+  built from the branch into the canary dir, `--dsh-home` pin outranking the
+  forwarded `$DSH_HOME`, own bundle id, `--no-update`, the missing
+  `desktop-branding.js`; the worktree + submodule-symlink rule;
+  the sandbox vs `~/Applications`, `pkill`-not-osascript, pnpm `-s` and
+  32-char-label traps.
 - `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
   (`chat-title` plugin, host-only): a `rename_chat` tool over
   `ctx.sessionTitle.rename` in the titler's style (read from the

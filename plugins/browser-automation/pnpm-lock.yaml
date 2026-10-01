@@ -21,7 +21,7 @@ importers:
         specifier: 1.9.0
         version: 1.9.0
       sharp:
-        specifier: 0.35.3
+        specifier: ^0.35.3
         version: 0.35.3
     devDependencies:
       '@deepseek-ai/cordis':

@@ -67,6 +67,8 @@ export function bundleIdCollisions(bundleId, dest, wrappers) {
   return wrappers.filter(w => w.kind === 'wrapper' && w.path !== dest && w.bundleId === bundleId).map(w => w.path)
 }
 const EXECUTABLE = 'DSH'
+/** The wrapper's page-side identity script (main.swift `identityScript()` loads it from Resources); every assembler must ship it. */
+export const BRANDING_SCRIPT = join(HERE, 'desktop-branding.js')
 
 // ---------------------------------------------------------------------------
 // Direct-remote apps: a wrapper that opens another Mac's DSH straight over the
@@ -284,7 +286,7 @@ export async function assembleBundle(spec) {
   await cp(spec.executable, join(contents, 'MacOS', EXECUTABLE))
   await chmod(join(contents, 'MacOS', EXECUTABLE), 0o755)
   await cp(spec.icns, join(contents, 'Resources', 'AppIcon.icns'))
-  await cp(join(HERE, 'desktop-branding.js'), join(contents, 'Resources', 'desktop-branding.js'))
+  await cp(BRANDING_SCRIPT, join(contents, 'Resources', 'desktop-branding.js'))
   // glyphColor lets the wrapper colour the page's sidebar whale like its icon (main.swift identityScript).
   // instance is informational (the bundle id is the truth); it lets a rebuild from this file pass --instance.
   const config = { name: spec.name, instance: instanceFromBundleId(bundleId) ?? '', url: spec.url, fallbackUrl: spec.fallbackUrl, tokenFile: spec.tokenFile, glyphColor: spec.glyphColor }

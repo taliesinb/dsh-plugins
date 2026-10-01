@@ -12,9 +12,7 @@
   },
   "files": [
     "index.js",
-    "egress.mjs",
-    "resolve.mjs",
-    "state.mjs",
+    "*.mjs",
     "cordis.patch.yml",
     "lib/client.js",
     "lib/client.js.map"

@@ -6,3 +6,6 @@ cordis.dev.local.yml
 
 # Machine-private deployment notes and inventories; never commit.
 /private/
+dist/
+.pnpm-store/
+.worktrees/

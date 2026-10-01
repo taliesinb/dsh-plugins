@@ -1,0 +1,5 @@
+# Bundle patch: part of the bundled macOS app's profile template. Both halves
+# register nothing unless the app's DSH_APP_BUNDLE environment is present.
+- insert:
+    - id: tali-app-setup
+      name: tali-app-setup

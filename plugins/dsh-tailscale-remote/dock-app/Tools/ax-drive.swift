@@ -5,6 +5,7 @@
 //   PID=$(pgrep -f "DSH Preview.app/Contents/MacOS/DSH")
 //   /tmp/ax-drive $PID state                 # window size + Desktop/Mobile check marks
 //   /tmp/ax-drive $PID menu View Mobile      # press a menu item
+//   /tmp/ax-drive $PID list "DSH Canary"     # items of one top-level menu, with enabled state
 //   /tmp/ax-drive $PID resize 1000 700       # AX-resize the first window
 //   screencapture -x -o -l$(/tmp/ax-drive $PID windowid) shot.png
 // Why pid-keyed: every DSH Dock app's executable is named "DSH", and System
@@ -63,6 +64,15 @@ case "menu":
     guard args.count >= 5, let item = menuItem(args[3], args[4]) else { print("menu item not found"); exit(1) }
     let r = AXUIElementPerformAction(item, kAXPressAction as CFString)
     print("press \(args[3]) > \(args[4]): \(r == .success ? "ok" : "error \(r.rawValue)")")
+case "list":
+    guard args.count >= 4, let bar = attr(app, kAXMenuBarAttribute) else { print("usage: list <Menu>"); exit(1) }
+    for top in children(bar as! AXUIElement) where title(top) == args[3] {
+        for menu in children(top) { for item in children(menu) {
+            let t = title(item); if t.isEmpty { print("—"); continue }
+            let enabled = (attr(item, kAXEnabledAttribute) as? Bool) ?? true
+            print("\(enabled ? "  " : "· ")\(t)")
+        } }
+    }
 case "state":
     state()
 case "resize":

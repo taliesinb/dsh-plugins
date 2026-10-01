@@ -1,0 +1,127 @@
+# Build the bundled macOS app and publish it as a GitHub Release — the feed
+# the installed app's updater polls (Updater.swift reads releases/latest).
+#
+# Triggers:
+#   - manually (Actions ▸ Release app ▸ Run workflow), optional notes / draft;
+#   - a push to main whose head commit subject starts with `release:` — the
+#     rest of the subject becomes the release notes.
+#
+# What runs is exactly `pnpm release-app` (tools/bundle/release.mjs): build
+# number YYYYMMDDnn from the existing canary-* tags, fetch Node, stage the
+# harness + plugins as tarballs, build DSH.app, the DMG (Finder-laid-out
+# window, embedded icon), sha256, `gh release create canary-<build>` marked
+# latest. Ad-hoc signed: first launch is right-click → Open. Developer ID
+# signing/notarization would slot in via `--sign` once a certificate exists.
+#
+# The harness is built from the submodule at the commit this repo pins
+# (release.mjs refuses anything else). A clean harness tree needs the Typert
+# artifacts emitted before `pnpm build` — see recipes/bundled-app-dmg.md.
+name: Release app
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Release notes (markdown); default = commit subjects since the previous release
+        required: false
+        type: string
+      draft:
+        description: Create as a draft (not marked latest, updater ignores it)
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-app
+  cancel-in-progress: false
+
+jobs:
+  release:
+    # On push: only when the head commit says so. Manual runs always proceed.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.head_commit.message, 'release:')
+    runs-on: macos-26   # arm64; the wrapper uses macOS 26 APIs (NSGlassEffectView) that the 15 SDK lacks
+    timeout-minutes: 90
+    permissions:
+      contents: write   # gh release create
+    env:
+      GH_TOKEN: ${{ github.token }}
+      npm_config_manage_package_manager_versions: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # release.mjs reads canary-* tags and commit subjects
+      - name: Harness submodule (pinned commit, over HTTPS)
+        # .gitmodules uses SSH URLs and `extras` is private: init only the
+        # harness, rewriting its URL, rather than `submodules: true`.
+        run: |
+          git config submodule.deepseek-harness.url https://github.com/taliesinb/deepseek-harness.git
+          git submodule update --init --depth 1 deepseek-harness
+          git -C deepseek-harness rev-parse --short HEAD
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: deepseek-harness/pnpm-lock.yaml
+
+      # A clean harness tree needs two passes (verified from scratch under
+      # Node 24, 2026-09-30): the host tsc pass fails on two client files that
+      # import the `/remote` Typert artifacts, but it has already emitted every
+      # other project — enough for the host tsdown pass to generate those
+      # artifacts — after which the full build is clean. A long-lived checkout
+      # never notices because its stale lib/ breaks the cycle. Fix belongs
+      # upstream (the host tsconfig chain reaches client sources); this is the
+      # workaround, not the design.
+      - name: Build the harness (pinned commit)
+        working-directory: deepseek-harness
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm run build:lib:host || echo "::notice::first host pass failed as expected on a clean tree (Typert cycle); continuing"
+          pnpm exec tsdown --env.DSH_BUILD_FACE host
+          pnpm build
+
+      # The stage tool needs pnpm >= 12: only 12 applies overrides to
+      # peerDependencies, which is how every first-party name is pinned to the
+      # fork's tarball (pnpm 11 installed 87 of them a second time from npm).
+      # The harness above wanted its own 11.7; switch now, for this repo's tools.
+      - name: pnpm 12 for the bundle tools
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.4.2 --activate
+          pnpm --version
+
+      - name: Release notes
+        id: notes
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            printf '%s' "${{ inputs.notes }}" > /tmp/notes.md
+          else
+            # "release: <text>" → "<text>" (first line only; the body stays in git)
+            git log -1 --format=%s | sed -E 's/^release:[[:space:]]*//' > /tmp/notes.md
+          fi
+          echo "has=$([ -s /tmp/notes.md ] && echo 1 || echo 0)" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish
+        shell: bash
+        run: |
+          args=(--repo "$GITHUB_REPOSITORY")
+          [ "${{ steps.notes.outputs.has }}" = "1" ] && args+=(--notes "$(cat /tmp/notes.md)")
+          [ "${{ inputs.draft }}" = "true" ] && args+=(--draft)
+          node tools/bundle/release.mjs "${args[@]}"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Release app"
+            ls dist/bundle/*.dmg 2>/dev/null | sed 's|^|- |' || echo "- no DMG produced"
+            echo
+            echo "Latest: https://github.com/$GITHUB_REPOSITORY/releases/latest"
+          } >> "$GITHUB_STEP_SUMMARY"

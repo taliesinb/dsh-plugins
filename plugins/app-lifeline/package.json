@@ -1,0 +1,24 @@
+{
+  "name": "tali-app-lifeline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin for the bundled macOS app: exits the server when the wrapper that spawned it dies (its stdin pipe closes). Inert outside the app.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "check": "node --check index.js"
+  }
+}

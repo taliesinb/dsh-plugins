@@ -11,10 +11,7 @@
   },
   "files": [
     "index.js",
-    "tools.mjs",
-    "dash.mjs",
-    "docsets.mjs",
-    "html-to-md.mjs",
+    "*.mjs",
     "cordis.patch.yml"
   ],
   "dsh": {

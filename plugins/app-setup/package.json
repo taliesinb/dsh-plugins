@@ -1,0 +1,45 @@
+{
+  "name": "tali-app-setup",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH plugin for the bundled macOS app: a first-run checklist of the companion apps DSH can use but does not carry (Tailscale, Safari Technology Preview, Chrome, afm), with one-click download pages; the same rows on the bundle's Plugins card. Inert outside the app.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "install.mjs",
+    "cordis.patch.yml",
+    "lib/client.js",
+    "lib/client.js.map"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "node -e \"import('./index.js')\""
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "link:../../deepseek-harness/vendor/cordis",
+    "@deepseek-ai/dsh-client-ui-layout": "link:../../deepseek-harness/packages/client/ui-layout",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "link:../../deepseek-harness/packages/client/ui-plugin-manager",
+    "@deepseek-ai/dsh-client-ui-primitives": "link:../../deepseek-harness/packages/client/ui-primitives",
+    "@deepseek-ai/dsh-client-ui-slots": "link:../../deepseek-harness/packages/client/ui-slots",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.2",
+    "@deepseek-ai/dsh-client-ui-renderer": "link:../../deepseek-harness/packages/client/ui-renderer"
+  }
+}

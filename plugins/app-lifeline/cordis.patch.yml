@@ -1,0 +1,5 @@
+# Bundle patch: part of the bundled macOS app's profile template. Harmless
+# elsewhere — the plugin only arms itself when DSH_APP_BUNDLE is set.
+- insert:
+    - id: tali-app-lifeline
+      name: tali-app-lifeline
