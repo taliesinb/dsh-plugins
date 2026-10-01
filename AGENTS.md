@@ -280,7 +280,10 @@ and none should be added, so a preview session can smoke-test UI/plugin
 behaviour but cannot run a real agent turn; test tool-using plugins headlessly
 or in a throwaway home with forwarded credentials (PREVIEWING.md).
 Full procedure, the ad-hoc `/tmp`-home alternative, credential forwarding and
-HMR gotchas: [PREVIEWING.md](PREVIEWING.md).
+HMR gotchas: [PREVIEWING.md](PREVIEWING.md). **To try a feature branch as a
+user, run `pnpm canary` from its worktree** — a separate instance with its own
+red-whale Dock app `DSH <branch> <commit>` and the branch's plugins
+(`recipes/canary-instances.md`).
 
 ### Verifying a client change without a GUI login
 
@@ -435,6 +438,17 @@ can reproduce or maintain it:
   `tool.call.images`, own `<img>` via `loadImage`), effective at the next
   restart; the pnpm store v10→v11 purge, and the throwaway-home + copied
   session/attachment method for seeing a real recorded row.
+- `canary-instances.md` — `pnpm canary` (`tools/canary.sh`): one throwaway
+  `dsh web` per branch plus a Dock app `DSH <branch> <commit>` (red whale;
+  the tailscale-remote wrapper via the new `dock-app:local`, token read from
+  `token.json` on every connect — the `entryURL()` wrapper change), an
+  `instance-identity` row with the same label, the plugins changed on the
+  branch vs `origin/main` (+ `--plugin`; `INFRA_PLUGINS` skipped),
+  credentials copied in, home under `/tmp/dsh-canary/<branch>/`,
+  `stop|remove|list|logs|url`; why not `pnpm dsh` (pnpm-12 temp dir), not
+  the standing preview, not the DMG; the worktree + submodule-symlink rule;
+  the sandbox vs `~/Applications`, `pkill`-not-osascript, pnpm `-s` and
+  32-char-label traps.
 - `chat-title-plugin.md` — the agent as reviewer of the automatic chat title
   (`chat-title` plugin, host-only): a `rename_chat` tool over
   `ctx.sessionTitle.rename` in the titler's style (read from the

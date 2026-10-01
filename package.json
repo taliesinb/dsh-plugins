@@ -1,7 +1,7 @@
 {
   "name": "tali-dash-plugins",
   "private": true,
-  "description": "DSH plugins, recipes and deployment tooling. Scripts: dev-overlay (write cordis.dev.local.yml with this checkout's absolute paths from the committed cordis.dev.yml template); bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; an existing DSH there is taken over by default, --no-replace refuses); bootstrap-thin-client [HOST [USER]] (tools/bootstrap-mac-thin-client.sh: only the blue Dock app to a remote DSH, no local build); uninstall-dsh [--force] (tools/uninstall-mac.sh: stop, unload, trash everything DSH on this Mac; keeps ~/.dsh and the checkouts); remote-app <host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
+  "description": "DSH plugins, recipes and deployment tooling. Scripts: canary [start|stop|list|logs|url] (tools/canary.sh: a separate throwaway dsh web labelled \"DSH <branch> <commit>\" loading the plugins changed on this branch); dev-overlay (write cordis.dev.local.yml with this checkout's absolute paths from the committed cordis.dev.yml template); bootstrap (fresh-machine installer, tools/bootstrap-mac.sh); bootstrap-remote user@host [flags] (same, over ssh; an existing DSH there is taken over by default, --no-replace refuses); bootstrap-thin-client [HOST [USER]] (tools/bootstrap-mac-thin-client.sh: only the blue Dock app to a remote DSH, no local build); uninstall-dsh [--force] (tools/uninstall-mac.sh: stop, unload, trash everything DSH on this Mac; keeps ~/.dsh and the checkouts); remote-app <host[/path]> [--name N] (blue Dock app straight to a remote DSH); install-plugins / remove-plugins [--profile web] (all live plugins as bundles); deploy-remote [user@host] [--no-build] [--credentials] [--port=N]; remote-logs / remote-status / remote-restart [user@host].",
   "scripts": {
     "dev-overlay": "tools/dev-overlay.sh",
     "bootstrap": "tools/bootstrap-mac.sh",
@@ -15,7 +15,8 @@
     "remote-logs": "tools/remote-ctl.sh logs",
     "remote-status": "tools/remote-ctl.sh status",
     "remote-restart": "tools/remote-ctl.sh restart",
-    "remote-stop": "tools/remote-ctl.sh stop"
+    "remote-stop": "tools/remote-ctl.sh stop",
+    "canary": "tools/canary.sh"
   },
   "pnpm": {
     "verifyDepsBeforeRun": false
