@@ -107,12 +107,32 @@ skips the tailscale lookup). Other wrappers built from the same source
 | Judging the glass from a snapshot | impossible: single-window captures render vibrancy as a flat fill |
 | `NSToolbar` with `.unified` style to get a 52px bar "for free" | not tried — an empty toolbar view sits above the content and would take the clicks the page needs |
 
+## Cold launch showed an opaque sidebar (2026-09-29)
+
+After a relaunch the material was gone in both modes until View ▸ Window
+Material was toggled once. Two facts, both fixed in `installBackdrop()`:
+
+- **A behind-window material installed before the window is on screen stays
+  opaque for the life of that content view.** The launch path built the
+  backdrop, *then* `makeKeyAndOrderFront`; a toggle rebuilt it on the visible
+  window, which is why it "worked" on the 22nd. Fix: keep the early install
+  (no empty window) and rebuild once via `DispatchQueue.main.async` right
+  after ordering front — the web view is only re-parented, as every switch does.
+- **The window must be non-opaque itself** (`isOpaque = false`,
+  `backgroundColor = .clear`, Electron's `'#00000000'`); AppKit tolerated the
+  default for a plain `NSVisualEffectView` but not once an `NSGlassEffectView`
+  had been in the hierarchy. Set on every rebuild. The glass is now a layer
+  *under* the page rather than the page's `contentView` host (as host it
+  captured the web view into its own backdrop pass), and `drawsBackground =
+  false` is re-asserted after each re-parent.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
 | Traffic lights back at the top-left corner of a 28px bar after leaving full screen | `layoutTrafficLights` did not run — it hooks `windowDidExitFullScreen`; check the delegate is set |
 | Cannot drag the window from the sidebar strip | the bridge script's selectors no longer match (`_topStrip` / `_titleRow` renamed upstream) or the click was on a control; `~/Library/Logs/DSH Dock/<app>.log` shows nothing for drags — add a log line to `titlebarMouseDown` to check the message arrives |
+| Sidebar opaque right after launch, fine after a Window Material toggle | the post-show `installBackdrop()` rebuild did not run (see the 2026-09-29 section) |
 | Sidebar opaque gray, no desktop showing through | `drawsBackground` KVC no longer honoured (WebKit change) or the client's darwin tint rule changed class names; View ▸ Save Window Snapshot cannot show this — look at the screen |
 | Page content hidden under the lights | the client did not get `data-platform="darwin"` before first paint (script order in `installUserScripts`) — the sidebar then has no top strip |
 | Traffic lights never show × – + on hover | `DockWindow._mouseInGroup:` override not called (AppKit renamed the private selector) — the buttons still work, only the glyphs are missing |

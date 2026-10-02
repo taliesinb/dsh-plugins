@@ -283,6 +283,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         syncViewModeMenu()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        // A behind-window material installed before the window is on screen
+        // stays opaque for the life of that content view (measured 2026-09-29:
+        // a cold launch showed a solid sidebar until View ▸ Window Material was
+        // toggled, which rebuilds the backdrop on the now-visible window). Rebuild
+        // once the window has been ordered front; the page is untouched (the web
+        // view is only re-parented, as every material switch does).
+        DispatchQueue.main.async { [weak self] in self?.installBackdrop() }
 
         connect()
     }
@@ -512,6 +519,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// between that blur and the page. Re-run when the choice changes.
     func installBackdrop() {
         let bounds = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 860)
+        // The window itself must compose against the desktop: an opaque window
+        // (AppKit's default) paints a solid base under any behind-window material
+        // once a glass view has been in the hierarchy (Electron: backgroundColor
+        // '#00000000'). Set on every rebuild so a material switch cannot leave the
+        // window opaque.
+        window.isOpaque = false
+        window.backgroundColor = .clear
         let backdrop = NSVisualEffectView(frame: bounds)
         backdrop.material = .sidebar
         backdrop.blendingMode = .behindWindow
@@ -519,15 +533,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         backdrop.state = .active
         webView.removeFromSuperview()
         webView.frame = backdrop.bounds
+        // Re-assert after re-parenting: the web view must paint no base of its own
+        // (private `_drawsBackground`, the switch Electron's transparent windows use).
+        webView.setValue(false, forKey: "drawsBackground")
         if #available(macOS 26.0, *), windowMaterial == .liquidGlass {
+            // The glass is a material layer UNDER the page, not the page's host: as
+            // `contentView` host it captured the web view into its own backdrop pass
+            // and the desktop no longer showed through (2026-09-29).
             let glass = NSGlassEffectView(frame: backdrop.bounds)
             glass.autoresizingMask = [.width, .height]
             glass.style = .clear
-            glass.contentView = webView
             backdrop.addSubview(glass)
-        } else {
-            backdrop.addSubview(webView)
         }
+        backdrop.addSubview(webView)
         window.contentView = backdrop
         syncWindowMaterialMenu()
     }
