@@ -196,10 +196,71 @@ enum WindowMaterial: String {
     }
 }
 
+/// The page's web view, with the window-drag regions handled NATIVELY — the
+/// Chromium/Electron model for `-webkit-app-region: drag`: the page reports
+/// where the title band is draggable (hit-tested rects, see
+/// `titlebarBridgeScript`), and a primary mousedown inside one is consumed
+/// here, before WebKit ever sees it. The earlier design (page `mousedown` →
+/// message → `performDrag` with `NSApp.currentEvent`) was fickle by
+/// construction: the message crossed from the WebContent process after WebKit
+/// had already begun a text selection, and by then the current event was
+/// often no longer the mousedown, so the guard failed and the click merely
+/// selected header text.
+///
+/// Everything in the band that is not a hard control (icon buttons, the
+/// header's action/utility buttons, tabs, inputs, menus) drags — including
+/// text and the soft triggers such as the session title and the mode chip.
+/// A press there is tracked natively: movement beyond the threshold moves the
+/// window; release without movement replays press + release into WebKit, so
+/// a click on the title still opens its picker. This is the native title-bar
+/// contract (drag anywhere, click what is clickable).
+final class DockWebView: WKWebView {
+    /// Draggable rects in CSS px of the viewport (origin top-left), as the page last reported them.
+    var dragRegions: [NSRect] = [] {
+        didSet { if dragRegions.count != oldValue.count { onDragRegionsChanged?(dragRegions.count) } }
+    }
+    var onDragRegionsChanged: ((Int) -> Void)?
+    /// The title-bar double-click action (System Settings ▸ Desktop & Dock).
+    var onTitlebarDoubleClick: (() -> Void)?
+    /// Test hook (DSH_DOCK_TEST=1): report the decision instead of moving the window.
+    var dragDryRun: ((NSPoint) -> Void)?
+    /// Points of travel before a press becomes a drag (AppKit's own drag slop).
+    static let dragThreshold: CGFloat = 3
+
+    /// The event's location in CSS px of the viewport, nil when it cannot be mapped
+    /// (pinch-zoomed: `magnification` moves the origin; fall through to WebKit).
+    func cssPoint(of event: NSEvent) -> NSPoint? {
+        guard magnification == 1, pageZoom > 0 else { return nil }
+        let p = convert(event.locationInWindow, from: nil)
+        let fromTop = isFlipped ? p.y : bounds.height - p.y
+        return NSPoint(x: p.x / pageZoom, y: fromTop / pageZoom)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard event.type == .leftMouseDown, let window, let css = cssPoint(of: event),
+              dragRegions.contains(where: { $0.contains(css) }) else { return super.mouseDown(with: event) }
+        if event.clickCount >= 2 { onTitlebarDoubleClick?(); return }
+        // Track the press ourselves: drag → window drag; plain click → replayed to WebKit.
+        let origin = event.locationInWindow
+        while true {
+            guard let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp], until: .distantFuture, inMode: .eventTracking, dequeue: true) else { continue }
+            if next.type == .leftMouseUp {
+                super.mouseDown(with: event)
+                super.mouseUp(with: next)
+                return
+            }
+            if hypot(next.locationInWindow.x - origin.x, next.locationInWindow.y - origin.y) >= Self.dragThreshold {
+                if let dragDryRun { dragDryRun(css) } else { window.performDrag(with: event) }
+                return
+            }
+        }
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler, WKDownloadDelegate, NSWindowDelegate, NSMenuDelegate {
     let config = DockConfig.load()
     var window: DockWindow!
-    var webView: WKWebView!
+    var webView: DockWebView!
     var viewMode: ViewMode = ViewMode.stored
     var desktopMenuItem: NSMenuItem!
     var mobileMenuItem: NSMenuItem!
@@ -235,7 +296,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         installUserScripts(into: configuration.userContentController)
         configuration.userContentController.add(self, name: "dshDock")
 
-        webView = WKWebView(frame: .zero, configuration: configuration)
+        webView = DockWebView(frame: .zero, configuration: configuration)
+        webView.onTitlebarDoubleClick = { [unowned self] in self.titlebarDoubleClick() }
+        webView.onDragRegionsChanged = { [unowned self] count in self.appendLog("drag regions: \(count)") }
+        installTestHook()
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsBackForwardNavigationGestures = false
@@ -351,25 +415,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     """
 
     /// Title-bar behaviour the page cannot get from WebKit alone:
-    ///   - drag: a primary mousedown on one of the client's drag regions (the
-    ///     sidebar top strip, the conversation title row — the elements the
-    ///     shipped CSS marks `-webkit-app-region: drag`, which WKWebView ignores)
-    ///     that is not on a control is reported with its click count; the
-    ///     wrapper moves the window or applies the title-bar double-click action;
-    ///   - theme: `html[data-ds-theme-source]` (light | dark | system, written by
+    ///   - drag regions: the top 52 CSS px of the page (the client's title band
+    ///     — the sidebar strip, the conversation title row; what the shipped CSS
+    ///     marks `-webkit-app-region: drag`, which WKWebView ignores) is
+    ///     reported to the wrapper as HIT-TESTED rects: every 6px column of each
+    ///     8px strip of the band is probed with `elementFromPoint`, and a point
+    ///     is draggable unless it lands on a hard control (icon buttons, the
+    ///     header's action/utility/corner buttons, tabs, inputs, menus and
+    ///     popups, the sidebar resize handle). Text, padding and soft triggers
+    ///     (session title, mode chip) drag; DockWebView tracks the press and
+    ///     replays a movement-free one to WebKit as a click. Re-reported
+    ///     (coalesced, ≤ 10/s, trailing 250ms) on DOM/attribute mutations,
+    ///     resize, scroll and transition/animation end.
+    ///   - the same mousedown, should it still reach the page (the map is at
+    ///     most a frame stale), is defaulted away so no selection starts, and
+    ///     reported as before (best-effort fallback drag). The title regions are
+    ///     also made non-selectable, as under Electron.
+    ///   - theme: `html[data-ds-theme-source]` (`light`/`dark`/`system`, set by
     ///     the client's theme presenter) is reported on load and on change so the
     ///     window appearance, hence the vibrancy material, follows the page.
-    /// The class selectors match the `<hash>_<local>` names CSS modules compile
-    /// to; the 60px band keeps a same-named class elsewhere from dragging.
     static let titlebarBridgeScript = """
     (() => {
       const post = body => { try { webkit.messageHandlers.dshDock.postMessage(body) } catch {} };
-      const control = 'button,a,input,textarea,select,summary,label,[role="button"],[role="menuitem"],[role="tab"],[role="slider"],[role="switch"],[role="checkbox"],[role="combobox"],[contenteditable]';
-      const region = '[class*="_topStrip"],[class*="_titleRow"]';
+      // Hard controls: forwarded to the page at once, never drag. Icon buttons
+      // (aria-label, no text), the header's action/utility/corner buttons, tabs,
+      // inputs, menus and their popups, the sidebar resize handle.
+      const hard = 'a,input,textarea,select,summary,[contenteditable],[role="tab"],[role="menuitem"],[role="menu"],[role="listbox"],[role="dialog"],[role="slider"],[role="switch"],[role="checkbox"],[data-radix-popper-content-wrapper],button[aria-label],[role="button"][aria-label],[class*="_headerActions"] button,[class*="_headerUtilities"] button,[class*="_headerCorner"] button,[class*="_handle"],[class*="_resizer"]';
+      const band = 52, strip = 8, step = 6;
+      const resizeCursor = /resize|grab/;
+      const softAt = (x, y) => {
+        const el = document.elementFromPoint(x, y);
+        if (!el || el.closest(hard)) return false;
+        return !resizeCursor.test(getComputedStyle(el).cursor);
+      };
+      let last = '';
+      const report = () => {
+        const rects = [];
+        const width = Math.min(innerWidth, document.documentElement.clientWidth);
+        for (let top = 0; top < band; top += strip) {
+          const y = top + strip / 2;
+          let run = null;
+          const flush = () => { if (run) { rects.push([run[0], top, run[1] - run[0], strip]); run = null } };
+          for (let x = step / 2; x < width; x += step) {
+            if (softAt(x, y)) { if (run) run[1] = x + step / 2; else run = [x - step / 2, x + step / 2] }
+            else flush();
+          }
+          flush();
+        }
+        const key = JSON.stringify(rects);
+        if (key !== last) { last = key; post({ type: 'dragRegions', rects }) }
+      };
+      let pending = false, lastRun = 0, trailing;
+      const run = () => { lastRun = performance.now(); report() };
+      const schedule = () => {
+        clearTimeout(trailing); trailing = setTimeout(run, 250);
+        if (pending) return;
+        pending = true;
+        setTimeout(() => requestAnimationFrame(() => { pending = false; run() }), Math.max(0, 100 - (performance.now() - lastRun)));
+      };
+      const start = () => {
+        const style = document.createElement('style');
+        style.textContent = 'html[data-platform="darwin"] [class*="_topStrip"],html[data-platform="darwin"] [class*="_titleRow"]{-webkit-user-select:none;user-select:none}';
+        document.head.appendChild(style);
+        new MutationObserver(schedule).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-state', 'data-open', 'data-sidebar-collapsed', 'aria-expanded', 'aria-hidden', 'aria-label'] });
+        new ResizeObserver(schedule).observe(document.documentElement);
+        addEventListener('resize', schedule);
+        addEventListener('scroll', schedule, true);
+        addEventListener('transitionend', schedule, true);
+        addEventListener('animationend', schedule, true);
+        schedule();
+      };
+      if (document.readyState === 'loading') addEventListener('DOMContentLoaded', start); else start();
+      // Should a press in the band still reach the page (the native map is at
+      // most a frame stale), keep it from starting a selection and hand it to
+      // the wrapper as a best-effort drag.
       addEventListener('mousedown', e => {
-        if (e.button !== 0 || e.buttons !== 1 || e.clientY > 60) return;
+        if (e.button !== 0 || e.buttons !== 1 || e.clientY > band) return;
         const target = e.target instanceof Element ? e.target : null;
-        if (!target || target.closest(control) || !target.closest(region)) return;
+        if (!target || target.closest(hard)) return;
+        e.preventDefault();
         post({ type: 'titlebar', clicks: e.detail });
       }, true);
       let sent;
@@ -442,21 +566,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     func windowDidExitFullScreen(_ notification: Notification) { layoutTrafficLights() }
     func windowDidBecomeKey(_ notification: Notification) { layoutTrafficLights() }
 
-    /// A mousedown on a page drag region. One click drags the window; a double
-    /// click applies the System Settings ▸ Desktop & Dock ▸ "Double-click a
-    /// window's title bar to" action (Zoom by default).
-    func titlebarMouseDown(clicks: Int) {
-        if clicks >= 2 {
-            let action = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
-            switch action {
-            case "Minimize": window.performMiniaturize(nil)
-            case "None": break
-            default: window.performZoom(nil)
-            }
-            return
+    /// System Settings ▸ Desktop & Dock ▸ "Double-click a window's title bar to" (Zoom by default).
+    func titlebarDoubleClick() {
+        let action = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)?["AppleActionOnDoubleClick"] as? String
+        switch action {
+        case "Minimize": window.performMiniaturize(nil)
+        case "None": break
+        default: window.performZoom(nil)
         }
-        // The message arrives after the event; the drag is still in progress (or the
-        // button is already up, in which case AppKit ends the drag at once).
+    }
+
+    /// Fallback for a mousedown the page still saw on a drag region (the native
+    /// region map is at most a frame stale — a menu that just opened, a layout
+    /// mid-transition). Best effort only: the message arrives after the event,
+    /// and the current event must still be the press for AppKit to track it.
+    func titlebarMouseDown(clicks: Int) {
+        if clicks >= 2 { titlebarDoubleClick(); return }
         guard let event = NSApp.currentEvent, event.type == .leftMouseDown || event.type == .leftMouseDragged else { return }
         window.performDrag(with: event)
     }
@@ -510,6 +635,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     /// Electron's `vibrancy: 'sidebar'`) blurring the desktop behind the
     /// window; the Liquid Glass variant (macOS 26+) adds an `NSGlassEffectView`
     /// between that blur and the page. Re-run when the choice changes.
+    /// Headless test hook, on only with `DSH_DOCK_TEST=1` in the environment
+    /// (launch the executable directly; `open` cannot pass it). Mouse events
+    /// posted to the pid with CGEvent never reach a view (AppKit drops mouse
+    /// events without a window; keyboard events work, mouse events do not —
+    /// measured 2026-09-29), so a test sends a distributed notification
+    /// `io.github.taliesinb.dsh-dock-app.test-event` with
+    /// `{ x, y (points from the window's top-left), clicks, kind: down|up }`
+    /// and the app dispatches a real NSEvent through `window.sendEvent`, i.e.
+    /// through hit-testing and DockWebView.mouseDown. A native drag decision is
+    /// logged (`native drag at …`) rather than performed — a synthetic press
+    /// cannot drive a window-server drag; the double-click action runs for real.
+    func installTestHook() {
+        guard ProcessInfo.processInfo.environment["DSH_DOCK_TEST"] == "1" else { return }
+        webView.dragDryRun = { [unowned self] css in self.appendLog("native drag at \(Int(css.x)),\(Int(css.y))") }
+        DistributedNotificationCenter.default().addObserver(forName: Notification.Name("io.github.taliesinb.dsh-dock-app.test-event"), object: nil, queue: .main) { [unowned self] note in
+            guard let info = note.userInfo, let x = info["x"] as? Double, let y = info["y"] as? Double else { return }
+            let clicks = info["clicks"] as? Int ?? 1
+            let type: NSEvent.EventType = (info["kind"] as? String) == "up" ? .leftMouseUp : .leftMouseDown
+            let location = NSPoint(x: x, y: self.window.frame.height - y)
+            guard let event = NSEvent.mouseEvent(with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: self.window.windowNumber, context: nil, eventNumber: 0, clickCount: clicks, pressure: 1) else { return }
+            self.window.sendEvent(event)
+        }
+        appendLog("test hook armed")
+    }
+
     func installBackdrop() {
         let bounds = window.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 1280, height: 860)
         let backdrop = NSVisualEffectView(frame: bounds)
@@ -728,6 +878,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
         // Popup windows share the user scripts; only the main page steers the main window.
         if body["type"] as? String == "titlebar" {
             if message.webView === webView { titlebarMouseDown(clicks: body["clicks"] as? Int ?? 1) }
+            return
+        }
+        if body["type"] as? String == "dragRegions" {
+            guard message.webView === webView, let rows = body["rects"] as? [[Double]] else { return }
+            webView.dragRegions = rows.compactMap { $0.count == 4 ? NSRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
             return
         }
         if body["type"] as? String == "theme" {
